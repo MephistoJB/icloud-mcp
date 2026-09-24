@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,6 +11,7 @@ from icloud_mcp.resource_ids import decode_resource_id, encode_resource_id
 
 
 def test_scoped_client_allows_only_its_scope(monkeypatch):
+    monkeypatch.setattr(auth, "get_access_token", lambda: None)
     monkeypatch.setattr(
         config, "MCP_CLIENTS",
         {"secret": {"client_id": "reader", "scopes": ["mail:read"]}},
@@ -21,6 +23,7 @@ def test_scoped_client_allows_only_its_scope(monkeypatch):
 
 
 def test_missing_token_is_denied_when_clients_exist(monkeypatch):
+    monkeypatch.setattr(auth, "get_access_token", lambda: None)
     monkeypatch.setattr(
         config, "MCP_CLIENTS",
         {"secret": {"client_id": "reader", "scopes": ["mail:read"]}},
@@ -28,6 +31,18 @@ def test_missing_token_is_denied_when_clients_exist(monkeypatch):
     monkeypatch.setattr(auth, "get_http_headers", lambda: {})
     with pytest.raises(AuthenticationError):
         require_scope(None, "mail:read")
+
+
+def test_verified_fastmcp_principal_does_not_require_raw_header(monkeypatch):
+    monkeypatch.setattr(
+        auth,
+        "get_access_token",
+        lambda: SimpleNamespace(client_id="reader", scopes=["mail:read"]),
+    )
+    monkeypatch.setattr(auth, "get_http_headers", dict)
+    assert require_scope(None, "mail:read") == "reader"
+    with pytest.raises(AuthorizationError):
+        require_scope(None, "mail:send")
 
 
 def test_http_configuration_fails_closed_without_token(monkeypatch):

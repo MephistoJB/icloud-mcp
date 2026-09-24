@@ -10,7 +10,7 @@ from typing import Optional, Tuple
 from urllib.parse import urlparse
 
 from fastmcp import Context
-from fastmcp.server.dependencies import get_http_headers
+from fastmcp.server.dependencies import get_access_token, get_http_headers
 
 from .config import config
 
@@ -67,6 +67,19 @@ def _audit(event: str, principal: str, scope: str, target: str = "") -> None:
 
 
 def require_scope(context: Context, scope: str, target: str = "") -> str:
+    # FastMCP validates HTTP bearer tokens before invoking a tool and exposes
+    # the resulting principal through its access-token context. Depending on
+    # the transport/version, the raw Authorization header may be intentionally
+    # removed before tool execution, so the verified context is authoritative.
+    verified = get_access_token()
+    if verified is not None:
+        principal = verified.client_id
+        if scope not in verified.scopes:
+            _audit("denied", principal, scope, target)
+            raise AuthorizationError(f"Client is not permitted to use {scope}")
+        _audit("authorized", principal, scope, target)
+        return principal
+
     headers = get_http_headers()
     token = _bearer_token(headers)
     if token:
