@@ -7,7 +7,6 @@ import email
 import email.policy
 import logging
 import sys
-import os
 import functools
 import anyio
 from email.mime.text import MIMEText
@@ -15,10 +14,9 @@ from email.mime.multipart import MIMEMultipart
 from email.header import decode_header
 from email.utils import getaddresses
 from typing import List, Dict, Any, Optional
-from datetime import datetime
 from fastmcp import Context
 from imapclient import IMAPClient
-from .auth import require_auth
+from .auth import require_auth, require_recipient_allowed
 from .config import config
 
 # Configure minimal logging (only errors)
@@ -743,14 +741,8 @@ async def send_message(
 
     # Recipient allowlist: an empty list means allow all (back-compat). When
     # set, every to/cc/bcc address must be present or the send is refused.
-    allowlist = config.EMAIL_SEND_ALLOWLIST
-    if allowlist:
-        allowed = {a.lower() for a in allowlist}
-        disallowed = [a for a in addrs if a.lower() not in allowed]
-        if disallowed:
-            raise ValueError(
-                "Recipient(s) not in EMAIL_SEND_ALLOWLIST: " + ", ".join(disallowed)
-            )
+    for address in addrs:
+        require_recipient_allowed(address)
 
     # Send via SMTP (off the event loop; connect+login+send are blocking)
     client = await _run(_get_smtp_client, username, password)

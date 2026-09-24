@@ -7,8 +7,10 @@ from fastmcp import Context, FastMCP
 from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
 from mcp.types import ToolAnnotations
 from . import calendar, contacts, email as email_module
-from .auth import AuthenticationError
+from .auth import AuthenticationError, require_enabled, require_scope
 from .config import config
+from .idempotency import run_once
+from .resource_ids import decode_resource_id, encode_result
 
 # Log unexpected tool failures to stderr; never surface exception text to the
 # client (see the generic 500 branch in every tool below).
@@ -19,13 +21,9 @@ _stderr_handler.setLevel(logging.ERROR)
 _stderr_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 logger.addHandler(_stderr_handler)
 
-# Optional bearer-token gate for the HTTP transport. MCP_AUTH_TOKEN unset ->
-# auth=None -> gate disabled (back-compat with stdio and unauthenticated HTTP).
-_auth = (
-    StaticTokenVerifier(tokens={config.MCP_AUTH_TOKEN: {"client_id": "icloud-mcp", "scopes": []}})
-    if config.MCP_AUTH_TOKEN
-    else None
-)
+# Bearer-token gate for HTTP. run.py refuses an unprotected HTTP deployment
+# unless the operator explicitly enables the emergency opt-out.
+_auth = StaticTokenVerifier(tokens=config.MCP_CLIENTS) if config.MCP_CLIENTS else None
 
 # mask_error_details keeps raw exception text (from explicitly-raised ToolError
 # aside) out of client responses; the tool bodies below also avoid returning
@@ -60,7 +58,8 @@ async def calendar_list_calendars(context: Context) -> list | dict:
     Returns a list of calendars with their IDs, names, and URLs.
     """
     try:
-        return await calendar.list_calendars(context)
+        require_scope(context, "calendar:read")
+        return encode_result(await calendar.list_calendars(context))
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
     except Exception:
@@ -84,7 +83,9 @@ async def calendar_list_events(
         end_date: End date in ISO format YYYY-MM-DD (optional)
     """
     try:
-        return await calendar.list_events(context, calendar_id, start_date, end_date)
+        require_scope(context, "calendar:read", calendar_id or "")
+        calendar_id = decode_resource_id(calendar_id) if calendar_id else None
+        return encode_result(await calendar.list_events(context, calendar_id, start_date, end_date))
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
     except Exception:
@@ -101,7 +102,8 @@ async def calendar_create_event(
     description: str | None = None,
     location: str | None = None,
     attendees: list[str] | None = None,
-    calendar_id: str | None = None
+    calendar_id: str | None = None,
+    request_id: str | None = None
 ) -> dict:
     """
     Create a new calendar event.
@@ -114,9 +116,21 @@ async def calendar_create_event(
         location: Event location (optional)
         attendees: List of attendee email addresses to invite (optional)
         calendar_id: Target calendar URL/ID (optional)
+        request_id: Optional idempotency key for safe retries
     """
     try:
-        return await calendar.create_event(context, summary, start, end, description, location, attendees, calendar_id)
+        principal = require_scope(context, "calendar:write", calendar_id or summary)
+        require_enabled(config.ENABLE_CALENDAR_WRITE, "calendar writes")
+        if attendees and config.ENABLE_CALENDAR_INVITATIONS:
+            require_scope(context, "mail:send", ",".join(attendees))
+            require_enabled(config.ENABLE_MAIL_SEND, "mail sending")
+        calendar_id = decode_resource_id(calendar_id) if calendar_id else None
+        result = await run_once(
+            principal, "calendar_create_event", request_id,
+            [summary, start, end, description, location, attendees, calendar_id],
+            lambda: calendar.create_event(context, summary, start, end, description, location, attendees, calendar_id),
+        )
+        return encode_result(result)
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
     except Exception:
@@ -148,7 +162,13 @@ async def calendar_update_event(
         attendees: New list of attendee email addresses (optional, replaces existing)
     """
     try:
-        return await calendar.update_event(context, event_id, summary, start, end, description, location, attendees)
+        require_scope(context, "calendar:write", event_id)
+        require_enabled(config.ENABLE_CALENDAR_WRITE, "calendar writes")
+        if attendees is not None and config.ENABLE_CALENDAR_INVITATIONS:
+            require_scope(context, "mail:send", ",".join(attendees))
+            require_enabled(config.ENABLE_MAIL_SEND, "mail sending")
+        event_id = decode_resource_id(event_id)
+        return encode_result(await calendar.update_event(context, event_id, summary, start, end, description, location, attendees))
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
     except Exception:
@@ -165,7 +185,12 @@ async def calendar_delete_event(context: Context, event_id: str) -> dict:
         event_id: Event URL/ID to delete
     """
     try:
-        return await calendar.delete_event(context, event_id)
+        require_scope(context, "calendar:delete", event_id)
+        require_enabled(config.ENABLE_CALENDAR_DELETE, "calendar deletion")
+        if config.ENABLE_CALENDAR_INVITATIONS:
+            require_scope(context, "mail:send", event_id)
+            require_enabled(config.ENABLE_MAIL_SEND, "mail sending")
+        return encode_result(await calendar.delete_event(context, decode_resource_id(event_id)))
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
     except Exception:
@@ -191,7 +216,9 @@ async def calendar_search_events(
         end_date: End date in ISO format (optional)
     """
     try:
-        return await calendar.search_events(context, query, calendar_id, start_date, end_date)
+        require_scope(context, "calendar:read", calendar_id or query)
+        calendar_id = decode_resource_id(calendar_id) if calendar_id else None
+        return encode_result(await calendar.search_events(context, query, calendar_id, start_date, end_date))
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
     except Exception:
@@ -212,7 +239,8 @@ async def contacts_list(context: Context, limit: int | None = None) -> list | di
         limit: Maximum number of contacts to return (optional)
     """
     try:
-        return await contacts.list_contacts(context, limit)
+        require_scope(context, "contacts:read")
+        return encode_result(await contacts.list_contacts(context, limit))
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
     except Exception:
@@ -229,7 +257,8 @@ async def contacts_get(context: Context, contact_id: str) -> dict:
         contact_id: Contact URL/ID
     """
     try:
-        return await contacts.get_contact(context, contact_id)
+        require_scope(context, "contacts:read", contact_id)
+        return encode_result(await contacts.get_contact(context, decode_resource_id(contact_id)))
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
     except Exception:
@@ -245,7 +274,8 @@ async def contacts_create(
     emails: list[str] | None = None,
     addresses: list[str] | None = None,
     organization: str | None = None,
-    title: str | None = None
+    title: str | None = None,
+    request_id: str | None = None
 ) -> dict:
     """
     Create a new contact.
@@ -257,9 +287,17 @@ async def contacts_create(
         addresses: List of postal addresses (optional)
         organization: Company/organization name (optional)
         title: Job title (optional)
+        request_id: Optional idempotency key for safe retries
     """
     try:
-        return await contacts.create_contact(context, name, phones, emails, addresses, organization, title)
+        principal = require_scope(context, "contacts:write", name)
+        require_enabled(config.ENABLE_CONTACTS_WRITE, "contact writes")
+        result = await run_once(
+            principal, "contacts_create", request_id,
+            [name, phones, emails, addresses, organization, title],
+            lambda: contacts.create_contact(context, name, phones, emails, addresses, organization, title),
+        )
+        return encode_result(result)
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
     except Exception:
@@ -291,7 +329,9 @@ async def contacts_update(
         title: New job title (optional)
     """
     try:
-        return await contacts.update_contact(context, contact_id, name, phones, emails, addresses, organization, title)
+        require_scope(context, "contacts:write", contact_id)
+        require_enabled(config.ENABLE_CONTACTS_WRITE, "contact writes")
+        return encode_result(await contacts.update_contact(context, decode_resource_id(contact_id), name, phones, emails, addresses, organization, title))
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
     except Exception:
@@ -308,7 +348,9 @@ async def contacts_delete(context: Context, contact_id: str) -> dict:
         contact_id: Contact URL/ID to delete
     """
     try:
-        return await contacts.delete_contact(context, contact_id)
+        require_scope(context, "contacts:delete", contact_id)
+        require_enabled(config.ENABLE_CONTACTS_DELETE, "contact deletion")
+        return await contacts.delete_contact(context, decode_resource_id(contact_id))
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
     except Exception:
@@ -325,7 +367,8 @@ async def contacts_search(context: Context, query: str) -> list | dict:
         query: Search text (matches name, email, phone)
     """
     try:
-        return await contacts.search_contacts(context, query)
+        require_scope(context, "contacts:read", query)
+        return encode_result(await contacts.search_contacts(context, query))
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
     except Exception:
@@ -345,6 +388,7 @@ async def email_list_folders(context: Context) -> list | dict:
     Returns a list of folders with their names and flags.
     """
     try:
+        require_scope(context, "mail:read")
         return await email_module.list_folders(context)
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
@@ -371,6 +415,7 @@ async def email_list_messages(
     Note: The Sent folder may be named "Sent Messages", "Sent", or "Sent Items" depending on your email provider.
     """
     try:
+        require_scope(context, "mail:read", folder)
         return await email_module.list_messages(context, folder, limit, unread_only)
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
@@ -397,6 +442,7 @@ async def email_get_message(
         full_html: Include full HTML body (default: False, only text body returned)
     """
     try:
+        require_scope(context, "mail:read", f"{folder}:{message_id}")
         return await email_module.get_message(context, message_id, folder, include_body, full_html)
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
@@ -423,6 +469,7 @@ async def email_get_messages(
         full_html: Include full HTML body (default: False, only text body returned)
     """
     try:
+        require_scope(context, "mail:read", folder)
         return await email_module.get_messages(context, message_ids, folder, include_body, full_html)
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
@@ -447,6 +494,7 @@ async def email_search(
         limit: Maximum number of results (default: 50)
     """
     try:
+        require_scope(context, "mail:read", folder)
         return await email_module.search_messages(context, query, folder, limit)
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
@@ -463,7 +511,8 @@ async def email_send(
     body: str,
     cc: str | None = None,
     bcc: str | None = None,
-    html: bool = False
+    html: bool = False,
+    request_id: str | None = None
 ) -> dict:
     """
     Send an email message via SMTP.
@@ -475,9 +524,16 @@ async def email_send(
         cc: CC recipients (optional, comma-separated)
         bcc: BCC recipients (optional, comma-separated)
         html: Whether body is HTML (default: False)
+        request_id: Optional idempotency key for safe retries
     """
     try:
-        return await email_module.send_message(context, to, subject, body, cc, bcc, html)
+        principal = require_scope(context, "mail:send", to)
+        require_enabled(config.ENABLE_MAIL_SEND, "mail sending")
+        return await run_once(
+            principal, "email_send", request_id,
+            [to, subject, body, cc, bcc, html],
+            lambda: email_module.send_message(context, to, subject, body, cc, bcc, html),
+        )
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
     except Exception:
@@ -501,6 +557,8 @@ async def email_move(
         to_folder: Destination folder
     """
     try:
+        require_scope(context, "mail:write", f"{from_folder}:{message_id}")
+        require_enabled(config.ENABLE_MAIL_WRITE, "mail writes")
         return await email_module.move_message(context, message_id, from_folder, to_folder)
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
@@ -525,6 +583,10 @@ async def email_delete(
         permanent: Permanently delete (True) or move to trash (False)
     """
     try:
+        require_scope(context, "mail:delete", f"{folder}:{message_id}")
+        require_enabled(config.ENABLE_MAIL_DELETE, "mail deletion")
+        if permanent:
+            require_enabled(config.ENABLE_PERMANENT_MAIL_DELETE, "permanent mail deletion")
         return await email_module.delete_message(context, message_id, folder, permanent)
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
@@ -547,6 +609,8 @@ async def email_mark_read(
         folder: Folder name (default: INBOX)
     """
     try:
+        require_scope(context, "mail:write", f"{folder}:{message_id}")
+        require_enabled(config.ENABLE_MAIL_WRITE, "mail writes")
         return await email_module.mark_as_read(context, message_id, folder)
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
@@ -569,6 +633,8 @@ async def email_mark_unread(
         folder: Folder name (default: INBOX)
     """
     try:
+        require_scope(context, "mail:write", f"{folder}:{message_id}")
+        require_enabled(config.ENABLE_MAIL_WRITE, "mail writes")
         return await email_module.mark_as_unread(context, message_id, folder)
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}

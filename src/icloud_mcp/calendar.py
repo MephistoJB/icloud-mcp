@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from fastmcp import Context
-from .auth import require_auth, require_trusted_url
+from .auth import require_auth, require_recipient_allowed, require_trusted_url
 from .config import config
 
 import logging
@@ -221,9 +221,7 @@ def _send_calendar_invitation(
     # Recipient allowlist (same gate as email.py's send path): empty means
     # allow all (back-compat). When set, this bounds the confused-deputy path
     # where a stored event names attacker-chosen recipients.
-    allowlist = config.EMAIL_SEND_ALLOWLIST
-    if allowlist and attendee_email.strip().lower() not in {a.lower() for a in allowlist}:
-        raise ValueError(f"Recipient not in EMAIL_SEND_ALLOWLIST: {attendee_email}")
+    require_recipient_allowed(attendee_email)
 
     # Create multipart message
     msg = MIMEMultipart('alternative')
@@ -585,7 +583,7 @@ SEQUENCE:0
         raise ValueError(f"Failed to create event in calendar '{calendar.name}': {str(e)}")
 
     # Send email invitations to attendees (iTIP protocol)
-    if attendees:
+    if attendees and config.ENABLE_CALENDAR_INVITATIONS:
         for attendee_email in attendees:
             try:
                 await _to_thread(
@@ -753,7 +751,7 @@ async def update_event(
     # Send update notifications only when attendees were modified AND this
     # account is the event's ORGANIZER — a planted event organized by someone
     # else must not use the victim's account to email its attendees.
-    if attendees is not None and attendee_list:
+    if config.ENABLE_CALENDAR_INVITATIONS and attendees is not None and attendee_list:
         organizer = _event_organizer_email(vevent)
         if organizer is None or organizer.lower() != email.lower():
             logger.warning(
@@ -858,7 +856,7 @@ async def delete_event(context: Context, event_id: str) -> Dict[str, str]:
     # Send cancellation notifications only when this account is the event's
     # ORGANIZER — a planted event organized by someone else must not use the
     # victim's account to email its attendees.
-    if attendee_list and ical_data:
+    if config.ENABLE_CALENDAR_INVITATIONS and attendee_list and ical_data:
         if event_organizer is None or event_organizer.lower() != email.lower():
             logger.warning(
                 "Skipping iTIP CANCEL: event organizer %r is not the "

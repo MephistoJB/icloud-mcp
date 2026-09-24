@@ -1,6 +1,6 @@
 [project]
 name = "icloud-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "MCP server for iCloud integration (CalDAV, CardDAV, IMAP/SMTP)"
 requires-python = ">=3.10"
 dependencies = [
@@ -23,3 +23,8 @@ dev = [
     "black>=23.0.0",
     "ruff>=0.1.0",
 ]
+
+[tool.ruff.lint]
+# The inherited implementation predates Ruff. Keep CI focused on runtime
+# correctness until upstream style can be modernized independently.
+select = ["E9", "F"]

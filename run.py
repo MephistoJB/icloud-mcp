@@ -39,6 +39,7 @@ def main():
         from src.icloud_mcp.config import config
 
     if args.http:
+        config.validate_http()
         port = args.port or int(os.environ.get("PORT", config.MCP_SERVER_PORT))
         print(f"Starting iCloud MCP Server with Streamable HTTP on {config.MCP_BIND_HOST}:{port}")
         mcp.run(

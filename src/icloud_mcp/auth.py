@@ -1,88 +1,121 @@
-"""Authentication management for iCloud MCP server."""
+"""iCloud credential, egress and MCP client authorization helpers."""
 
-from typing import Tuple, Optional
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import sys
+from typing import Optional, Tuple
 from urllib.parse import urlparse
+
 from fastmcp import Context
 from fastmcp.server.dependencies import get_http_headers
+
 from .config import config
 
 
 class AuthenticationError(Exception):
-    """Raised when authentication fails."""
     pass
 
 
-def require_trusted_url(url: str, base: str, kind: str) -> None:
-    """Reject absolute URLs that point away from *base*'s host family.
+class AuthorizationError(AuthenticationError, ValueError):
+    pass
 
-    Object ids (calendar_id / event_id / contact_id) are caller-controlled
-    URLs that get requested with the user's Basic-Auth credentials attached,
-    so an absolute URL naming a foreign host leaks those credentials to that
-    host. Relative paths resolve against the configured server and are fine.
-    Provider partition hosts (e.g. p72-caldav.icloud.com) stay allowed via
-    the shared parent domain.
-    """
+
+def _host_matches(host: str, pattern: str) -> bool:
+    if pattern.startswith("*-"):
+        suffix = pattern[1:]
+        return host.endswith(suffix) and len(host) > len(suffix)
+    if pattern.startswith("*."):
+        suffix = pattern[1:]
+        return host.endswith(suffix) and host != suffix[1:]
+    return hmac.compare_digest(host, pattern)
+
+
+def require_trusted_url(url: str, base: str, kind: str) -> None:
     parsed = urlparse(url)
     if not parsed.scheme and not parsed.netloc:
         return
     base_parsed = urlparse(base)
-    # urlparse and requests/urllib3 disagree on authorities containing a
-    # backslash or userinfo: urlparse reports the trailing host while the HTTP
-    # stack connects to the leading host, so a payload like
-    # "https://evil.com\@contacts.icloud.com/x" would pass the host check below
-    # yet send the Basic-Auth credential to evil.com. Reject those outright.
     if "\\" in parsed.netloc or "@" in parsed.netloc:
-        raise ValueError(
-            f"{kind} has an untrusted authority; refusing to send credentials to "
-            f"{parsed.netloc}"
-        )
-    # Strip a trailing root dot so the FQDN form (contacts.icloud.com.) of the
-    # configured host is not rejected as foreign.
-    host = (parsed.hostname or "").rstrip(".")
-    base_host = (base_parsed.hostname or "").rstrip(".")
-    # Registrable parent: for a 3+ label host (e.g. contacts.icloud.com) this is
-    # the last two labels (icloud.com), which admits provider partition hosts
-    # like p72-caldav.icloud.com. For a 2-label base it stays the base itself so
-    # the check never widens to a public suffix (.com).
-    labels = base_host.split(".")
-    parent = ".".join(labels[-2:]) if len(labels) >= 3 else base_host
-    same_domain = host == base_host or host.endswith("." + parent)
-    if parsed.scheme != base_parsed.scheme or not same_domain:
-        raise ValueError(
-            f"{kind} must be a relative path or a {base_parsed.scheme} URL under "
-            f"{base_host}; refusing to send credentials to {parsed.netloc}"
-        )
+        raise ValueError(f"{kind} has an untrusted authority")
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if parsed.scheme != base_parsed.scheme or parsed.scheme != "https":
+        raise ValueError(f"{kind} must use the configured HTTPS provider")
+    if parsed.port not in (None, 443):
+        raise ValueError(f"{kind} uses an untrusted port")
+    if not any(_host_matches(host, pattern) for pattern in config.allowed_hosts_for(base)):
+        raise ValueError(f"{kind} points to an untrusted host")
+
+
+def _bearer_token(headers: dict[str, str]) -> Optional[str]:
+    value = headers.get("authorization", "")
+    scheme, separator, token = value.partition(" ")
+    return token.strip() if separator and scheme.lower() == "bearer" and token.strip() else None
+
+
+def _audit(event: str, principal: str, scope: str, target: str = "") -> None:
+    if not config.AUDIT_LOG_ENABLED:
+        return
+    key = (config.AUDIT_HMAC_KEY or "icloud-mcp-audit").encode()
+    target_hash = hmac.new(key, target.encode(), hashlib.sha256).hexdigest()[:16] if target else None
+    print(json.dumps({
+        "audit": "icloud-mcp", "event": event, "principal": principal,
+        "scope": scope, "target_hash": target_hash,
+    }, separators=(",", ":")), file=sys.stderr)
+
+
+def require_scope(context: Context, scope: str, target: str = "") -> str:
+    headers = get_http_headers()
+    token = _bearer_token(headers)
+    if token:
+        match = next(((candidate, data) for candidate, data in config.MCP_CLIENTS.items()
+                      if hmac.compare_digest(candidate, token)), None)
+        if not match:
+            _audit("denied", "unknown", scope, target)
+            raise AuthenticationError("Invalid MCP bearer token")
+        metadata = match[1]
+        principal = metadata["client_id"]
+        if scope not in metadata.get("scopes", []):
+            _audit("denied", principal, scope, target)
+            raise AuthorizationError(f"Client is not permitted to use {scope}")
+        _audit("authorized", principal, scope, target)
+        return principal
+    if config.MCP_CLIENTS:
+        raise AuthenticationError("MCP bearer token required")
+    if config.MCP_TRUST_STDIO:
+        _audit("authorized", "stdio", scope, target)
+        return "stdio"
+    raise AuthenticationError("MCP bearer token required")
+
+
+def require_enabled(enabled: bool, capability: str) -> None:
+    if not enabled:
+        raise AuthorizationError(f"{capability} is disabled by server policy")
+
+
+def require_recipient_allowed(address: str) -> None:
+    cleaned = address.strip().lower()
+    if config.EMAIL_SEND_ALLOWLIST and cleaned not in config.EMAIL_SEND_ALLOWLIST:
+        raise AuthorizationError("Recipient is not permitted by server policy")
 
 
 def get_credentials(context: Context) -> Tuple[str, str]:
-    """Extract iCloud credentials from HTTP headers."""
-
-    # Get HTTP headers using FastMCP's dependency function (keys are lowercased)
     headers = get_http_headers()
-
-    email: Optional[str]
-    password: Optional[str]
-    # If either credential header is present, both credentials come from headers
-    # only. Never pair a caller-supplied header with the operator's env secret:
-    # that would let an attacker's email header borrow the env password.
-    if "x-apple-email" in headers or "x-apple-app-specific-password" in headers:
+    header_present = "x-apple-email" in headers or "x-apple-app-specific-password" in headers
+    if header_present:
+        if not config.ALLOW_HEADER_CREDENTIALS:
+            raise AuthenticationError("Per-request iCloud credentials are disabled")
         email = headers.get("x-apple-email")
         password = headers.get("x-apple-app-specific-password")
     else:
         email = config.FALLBACK_EMAIL
         password = config.FALLBACK_PASSWORD
-
-    # Validate credentials
     if not email or not password:
-        raise AuthenticationError(
-            "Authentication required. Provide credentials via headers "
-            "(X-Apple-Email, X-Apple-App-Specific-Password) or environment variables "
-            "(ICLOUD_EMAIL, ICLOUD_APP_SPECIFIC_PASSWORD)"
-        )
-
+        raise AuthenticationError("iCloud credentials are not configured")
     return email, password
 
 
 def require_auth(context: Context) -> Tuple[str, str]:
-    """Decorator-friendly authentication check."""
     return get_credentials(context)

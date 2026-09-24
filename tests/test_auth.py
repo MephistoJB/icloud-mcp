@@ -60,7 +60,15 @@ PROD_BASES = [config.CALDAV_SERVER, config.CARDDAV_SERVER]
 
 @pytest.mark.parametrize("base", PROD_BASES)
 def test_partition_host_trusted_for_both_bases(base):
-    require_trusted_url("https://p72-caldav.icloud.com/1/", base, "id")  # no raise
+    service = "caldav" if "caldav" in base else "contacts"
+    require_trusted_url(f"https://p72-{service}.icloud.com/1/", base, "id")  # no raise
+
+
+def test_caldav_partition_is_not_trusted_for_carddav():
+    with pytest.raises(ValueError):
+        require_trusted_url(
+            "https://p72-caldav.icloud.com/1/", config.CARDDAV_SERVER, "id"
+        )
 
 
 @pytest.mark.parametrize("base", PROD_BASES)
@@ -74,6 +82,7 @@ def test_backslash_bypass_raises_for_both_bases(base):
 def _set_headers(monkeypatch, headers):
     # get_http_headers lowercases keys; monkeypatch the name used inside auth.
     monkeypatch.setattr(auth, "get_http_headers", lambda: headers)
+    monkeypatch.setattr(config, "ALLOW_HEADER_CREDENTIALS", True)
 
 
 def test_header_email_does_not_pull_env_password(monkeypatch):
