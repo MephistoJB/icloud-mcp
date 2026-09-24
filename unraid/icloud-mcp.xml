@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>iCloud-MCP</Name>
+  <Repository>ghcr.io/mephistojb/icloud-mcp:latest</Repository>
+  <Registry>https://github.com/MephistoJB/icloud-mcp/pkgs/container/icloud-mcp</Registry>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/MephistoJB/icloud-mcp/issues</Support>
+  <Project>https://github.com/MephistoJB/icloud-mcp</Project>
+  <Overview>Hardened multi-agent MCP server for iCloud Mail, Calendar and Contacts. HTTP authentication is mandatory. Destructive capabilities are disabled by default.</Overview>
+  <Category>Productivity: Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8000]/health</WebUI>
+  <Shell>sh</Shell>
+  <ExtraParams>--read-only --cap-drop=ALL --security-opt=no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>An Apple app-specific password. Use a reverse proxy with TLS when the MCP endpoint crosses a trusted LAN boundary.</Requires>
+  <Config Name="MCP Port" Target="8000" Default="8000" Mode="tcp" Description="Streamable HTTP endpoint is /mcp." Type="Port" Display="always" Required="true" Mask="false">8000</Config>
+  <Config Name="MCP Bearer Token" Target="MCP_AUTH_TOKEN" Default="" Mode="" Description="Long random compatibility token. For per-agent scopes use MCP Clients JSON instead." Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="MCP Clients JSON" Target="MCP_CLIENTS_JSON" Default="" Mode="" Description="Scoped clients, e.g. [{&amp;quot;id&amp;quot;:&amp;quot;reader&amp;quot;,&amp;quot;token&amp;quot;:&amp;quot;...&amp;quot;,&amp;quot;scopes&amp;quot;:[&amp;quot;mail:read&amp;quot;]}]." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="iCloud Email" Target="ICLOUD_EMAIL" Default="" Mode="" Description="Apple/iCloud account email." Type="Variable" Display="always" Required="true" Mask="false"/>
+  <Config Name="App-Specific Password" Target="ICLOUD_APP_SPECIFIC_PASSWORD" Default="" Mode="" Description="Apple app-specific password, not the Apple ID password." Type="Variable" Display="always" Required="true" Mask="true"/>
+  <Config Name="Allowed Recipients" Target="EMAIL_SEND_ALLOWLIST" Default="" Mode="" Description="Comma-separated exact addresses. Empty allows all recipients." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="Calendar Writes" Target="ENABLE_CALENDAR_WRITE" Default="true" Mode="" Description="Permit event creation and updates for clients with calendar:write." Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
+  <Config Name="Calendar Deletes" Target="ENABLE_CALENDAR_DELETE" Default="false" Mode="" Description="Permit event deletion for clients with calendar:delete." Type="Variable" Display="advanced" Required="true" Mask="false">false</Config>
+  <Config Name="Calendar Invitations" Target="ENABLE_CALENDAR_INVITATIONS" Default="false" Mode="" Description="Send invitation/update/cancellation emails. The agent also needs mail:send." Type="Variable" Display="advanced" Required="true" Mask="false">false</Config>
+  <Config Name="Contact Writes" Target="ENABLE_CONTACTS_WRITE" Default="true" Mode="" Description="Permit contact creation and updates." Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
+  <Config Name="Contact Deletes" Target="ENABLE_CONTACTS_DELETE" Default="false" Mode="" Description="Permit contact deletion." Type="Variable" Display="advanced" Required="true" Mask="false">false</Config>
+  <Config Name="Mail Writes" Target="ENABLE_MAIL_WRITE" Default="true" Mode="" Description="Permit move/read-state operations." Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
+  <Config Name="Mail Deletes" Target="ENABLE_MAIL_DELETE" Default="false" Mode="" Description="Permit moving mail to trash." Type="Variable" Display="advanced" Required="true" Mask="false">false</Config>
+  <Config Name="Permanent Mail Deletes" Target="ENABLE_PERMANENT_MAIL_DELETE" Default="false" Mode="" Description="Permit irreversible IMAP deletion in addition to Mail Deletes." Type="Variable" Display="advanced" Required="true" Mask="false">false</Config>
+  <Config Name="Mail Send" Target="ENABLE_MAIL_SEND" Default="true" Mode="" Description="Permit SMTP sending for clients with mail:send." Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
+  <Config Name="Timezone" Target="DEFAULT_TZ" Default="UTC" Mode="" Description="IANA timezone for naive calendar values, e.g. Europe/Berlin." Type="Variable" Display="always" Required="true" Mask="false">UTC</Config>
+  <Config Name="Signed Resource Key" Target="RESOURCE_ID_SIGNING_KEY" Default="" Mode="" Description="Optional HMAC key for opaque signed Calendar/Contact IDs." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="Allow Legacy URL IDs" Target="ALLOW_LEGACY_URL_IDS" Default="true" Mode="" Description="Keep true during migration; set false after all agents use signed IDs." Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
+  <Config Name="Audit Logging" Target="AUDIT_LOG_ENABLED" Default="true" Mode="" Description="Structured authorization audit events on container stderr." Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
+  <Config Name="HTTP Timeout" Target="HTTP_TIMEOUT" Default="30" Mode="" Description="Outbound timeout in seconds." Type="Variable" Display="advanced" Required="true" Mask="false">30</Config>
+</Container>

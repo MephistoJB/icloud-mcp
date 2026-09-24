@@ -1,29 +1,48 @@
-version: '3.8'
-
 services:
   icloud-mcp:
+    image: ghcr.io/mephistojb/icloud-mcp:${ICLOUD_MCP_IMAGE_TAG:-latest}
     build: .
-    container_name: icloud-mcp-server
+    container_name: icloud-mcp
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m
     ports:
-      # Bound to loopback by default so the server is not reachable from other
-      # hosts on the network. To expose it beyond localhost (e.g. behind a
-      # reverse proxy), drop the "127.0.0.1:" prefix AND set MCP_AUTH_TOKEN
-      # below, plus put a reverse proxy in front for TLS/access control.
-      - "127.0.0.1:${MCP_SERVER_PORT:-8000}:8000"
+      - "${MCP_LISTEN_ADDRESS:-127.0.0.1}:${MCP_SERVER_PORT:-8000}:8000"
     environment:
-      # iCloud credentials (optional, can use headers instead)
-      - ICLOUD_EMAIL=${ICLOUD_EMAIL:-}
-      - ICLOUD_APP_SPECIFIC_PASSWORD=${ICLOUD_APP_SPECIFIC_PASSWORD:-}
-
-      # Server configuration (optional, defaults provided)
-      - CALDAV_SERVER=${CALDAV_SERVER:-https://caldav.icloud.com}
-      - CARDDAV_SERVER=${CARDDAV_SERVER:-https://contacts.icloud.com}
-      - IMAP_SERVER=${IMAP_SERVER:-imap.mail.me.com}
-      - SMTP_SERVER=${SMTP_SERVER:-smtp.mail.me.com}
-      - PORT=8000
-
-      # Bearer token required by clients when set (Authorization: Bearer <token>).
-      # Required if the port publish above is ever exposed beyond 127.0.0.1.
-      - MCP_AUTH_TOKEN=${MCP_AUTH_TOKEN:-}
-
+      PORT: "8000"
+      HOST: "0.0.0.0"
+      MCP_AUTH_TOKEN: "${MCP_AUTH_TOKEN:-}"
+      MCP_AUTH_TOKEN_FILE: "${MCP_AUTH_TOKEN_FILE:-}"
+      MCP_CLIENTS_JSON: "${MCP_CLIENTS_JSON:-}"
+      MCP_CLIENTS_JSON_FILE: "${MCP_CLIENTS_JSON_FILE:-}"
+      ICLOUD_EMAIL: "${ICLOUD_EMAIL:-}"
+      ICLOUD_EMAIL_FILE: "${ICLOUD_EMAIL_FILE:-}"
+      ICLOUD_APP_SPECIFIC_PASSWORD: "${ICLOUD_APP_SPECIFIC_PASSWORD:-}"
+      ICLOUD_APP_SPECIFIC_PASSWORD_FILE: "${ICLOUD_APP_SPECIFIC_PASSWORD_FILE:-}"
+      ICLOUD_ALLOW_HEADER_CREDENTIALS: "${ICLOUD_ALLOW_HEADER_CREDENTIALS:-false}"
+      EMAIL_SEND_ALLOWLIST: "${EMAIL_SEND_ALLOWLIST:-}"
+      ENABLE_CALENDAR_WRITE: "${ENABLE_CALENDAR_WRITE:-true}"
+      ENABLE_CALENDAR_DELETE: "${ENABLE_CALENDAR_DELETE:-false}"
+      ENABLE_CALENDAR_INVITATIONS: "${ENABLE_CALENDAR_INVITATIONS:-false}"
+      ENABLE_CONTACTS_WRITE: "${ENABLE_CONTACTS_WRITE:-true}"
+      ENABLE_CONTACTS_DELETE: "${ENABLE_CONTACTS_DELETE:-false}"
+      ENABLE_MAIL_WRITE: "${ENABLE_MAIL_WRITE:-true}"
+      ENABLE_MAIL_DELETE: "${ENABLE_MAIL_DELETE:-false}"
+      ENABLE_PERMANENT_MAIL_DELETE: "${ENABLE_PERMANENT_MAIL_DELETE:-false}"
+      ENABLE_MAIL_SEND: "${ENABLE_MAIL_SEND:-true}"
+      RESOURCE_ID_SIGNING_KEY_FILE: "${RESOURCE_ID_SIGNING_KEY_FILE:-}"
+      ALLOW_LEGACY_URL_IDS: "${ALLOW_LEGACY_URL_IDS:-true}"
+      AUDIT_LOG_ENABLED: "${AUDIT_LOG_ENABLED:-true}"
+      AUDIT_HMAC_KEY_FILE: "${AUDIT_HMAC_KEY_FILE:-}"
+      IDEMPOTENCY_STORE_PATH: "${IDEMPOTENCY_STORE_PATH:-/tmp/icloud-mcp-idempotency.sqlite3}"
+      DEFAULT_TZ: "${DEFAULT_TZ:-UTC}"
+      HTTP_TIMEOUT: "${HTTP_TIMEOUT:-30}"
+      CALDAV_SERVER: "${CALDAV_SERVER:-https://caldav.icloud.com}"
+      CARDDAV_SERVER: "${CARDDAV_SERVER:-https://contacts.icloud.com}"
+      IMAP_SERVER: "${IMAP_SERVER:-imap.mail.me.com}"
+      SMTP_SERVER: "${SMTP_SERVER:-smtp.mail.me.com}"
+      CALDAV_ALLOWED_HOSTS: "${CALDAV_ALLOWED_HOSTS:-caldav.icloud.com,*-caldav.icloud.com}"
+      CARDDAV_ALLOWED_HOSTS: "${CARDDAV_ALLOWED_HOSTS:-contacts.icloud.com,*-contacts.icloud.com}"
     restart: unless-stopped

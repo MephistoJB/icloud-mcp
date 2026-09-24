@@ -1,368 +1,173 @@
 # iCloud MCP Server
 
-MCP (Model Context Protocol) server for iCloud integration, providing tools for managing calendars (CalDAV), contacts (CardDAV), and email (IMAP/SMTP).
+A hardened, self-hosted MCP server for iCloud Calendar (CalDAV), Contacts
+(CardDAV), and Mail (IMAP/SMTP). It keeps the upstream tool names and remains
+compatible with clients written for `mike-tih/icloud-mcp`, while adding
+network-safe authentication, per-agent permissions, action policy, audit
+events, idempotency, signed resource IDs, and an Unraid template.
 
-## Features
+## Tools
 
-- **Stateless Architecture**: No state stored between requests
-- **Full CRUD Operations**: Complete management of calendars, contacts, and email
-- **Flexible Authentication**: Via headers or environment variables
-- **Multiple Transports**: stdio (local) or Streamable HTTP (server)
-- **Docker Support**: Easy deployment with Docker and Docker Compose
+- Calendar: `calendar_list_calendars`, `calendar_list_events`,
+  `calendar_search_events`, `calendar_create_event`,
+  `calendar_update_event`, `calendar_delete_event`
+- Contacts: `contacts_list`, `contacts_get`, `contacts_search`,
+  `contacts_create`, `contacts_update`, `contacts_delete`
+- Mail: `email_list_folders`, `email_list_messages`, `email_get_message`,
+  `email_get_messages`, `email_search`, `email_send`, `email_move`,
+  `email_delete`, `email_mark_read`, `email_mark_unread`
 
-## Supported Operations
+`calendar_create_event`, `contacts_create`, and `email_send` accept an
+optional `request_id`. Repeating the same request ID and arguments returns the
+stored result without repeating the external action.
 
-### Calendar Tools (CalDAV)
-- `calendar_list_calendars` - List all calendars
-- `calendar_list_events` - List events with date filtering
-- `calendar_create_event` - Create new event
-- `calendar_update_event` - Update existing event
-- `calendar_delete_event` - Delete event
-- `calendar_search_events` - Search events by text
+## Quick start with Docker Compose
 
-### Contacts Tools (CardDAV)
-- `contacts_list` - List all contacts
-- `contacts_get` - Get specific contact
-- `contacts_create` - Create new contact (name, phones, emails, addresses, organization, title)
-- `contacts_update` - Update existing contact
-- `contacts_delete` - Delete contact
-- `contacts_search` - Search contacts by text
-
-### Email Tools (IMAP/SMTP)
-- `email_list_folders` - List mail folders
-- `email_list_messages` - List messages in folder
-- `email_get_message` - Get full message details
-- `email_get_messages` - Get multiple messages at once (bulk fetch)
-- `email_search` - Search messages by text
-- `email_send` - Send email via SMTP
-- `email_move` - Move message to folder
-- `email_delete` - Delete or trash message
-- `email_mark_read` - Mark message as read
-- `email_mark_unread` - Mark message as unread
-
-## Installation
-
-### Prerequisites
-
-- **Python 3.10 - 3.12** (Python 3.13+ not yet supported due to dependency compatibility)
-- iCloud account with App-Specific Password ([Generate here](https://appleid.apple.com/account/manage))
-
-### Local Installation
+Create an Apple app-specific password, then:
 
 ```bash
-# Clone repository
-git clone <repository-url>
-cd icloud-mcp
-
-# Create virtual environment with Python 3.10-3.12
-python3.12 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install package in editable mode
-pip install -e .
-
-# Configure environment
 cp .env.example .env
-# Edit .env with your credentials
+# Set MCP_AUTH_TOKEN, ICLOUD_EMAIL and ICLOUD_APP_SPECIFIC_PASSWORD.
+docker compose up -d
 ```
 
-### Docker Installation
+The MCP endpoint is `http://127.0.0.1:8000/mcp`. HTTP startup fails closed
+when neither `MCP_AUTH_TOKEN` nor `MCP_CLIENTS_JSON` is configured.
 
-```bash
-# Clone repository
-git clone <repository-url>
-cd icloud-mcp
+## Unraid
 
-# Configure environment
-cp .env.example .env
-# Edit .env with your credentials
+1. Copy `unraid/icloud-mcp.xml` to
+   `/boot/config/plugins/dockerMan/templates-user/my-icloud-mcp.xml`, or add
+   its raw GitHub URL through Unraid's template workflow.
+2. Set a long random **MCP Bearer Token**, the iCloud email, and an Apple
+   app-specific password.
+3. Keep delete switches disabled until a dedicated agent actually needs them.
+4. Install the container. No companion database, proxy, or sidecar is needed.
 
-# Build and run with Docker Compose
-docker-compose up -d
+The template applies `--read-only`, `--cap-drop=ALL`,
+`no-new-privileges`, a bounded `/tmp` tmpfs, and runs as UID/GID 10001.
+The published GHCR image supports AMD64 and ARM64.
+
+## Per-agent access
+
+The legacy `MCP_AUTH_TOKEN` grants all scopes. For multiple agents, use
+`MCP_CLIENTS_JSON` (or preferably `MCP_CLIENTS_JSON_FILE`):
+
+```json
+[
+  {
+    "id": "inbox-reader",
+    "token": "long-random-token-1",
+    "scopes": ["mail:read", "calendar:read"]
+  },
+  {
+    "id": "assistant",
+    "token": "long-random-token-2",
+    "scopes": [
+      "mail:read", "mail:write", "mail:send",
+      "calendar:read", "calendar:write",
+      "contacts:read"
+    ]
+  }
+]
 ```
+
+Available scopes are:
+
+| Area | Read | Change | Delete / send |
+|---|---|---|---|
+| Calendar | `calendar:read` | `calendar:write` | `calendar:delete` |
+| Contacts | `contacts:read` | `contacts:write` | `contacts:delete` |
+| Mail | `mail:read` | `mail:write` | `mail:delete`, `mail:send` |
+
+Scopes and server capability switches are both enforced. For example,
+`mail:delete` is insufficient while `ENABLE_MAIL_DELETE=false`.
 
 ## Configuration
 
-### Environment Variables
+Every setting is supplied by environment variable. Secret values also support
+a same-named `_FILE` variant, such as
+`ICLOUD_APP_SPECIFIC_PASSWORD_FILE=/run/secrets/apple-password`.
 
-Create a `.env` file with the following variables:
+| Variable | Default | Purpose |
+|---|---:|---|
+| `MCP_AUTH_TOKEN` | empty | Backward-compatible all-scope bearer token |
+| `MCP_CLIENTS_JSON(_FILE)` | empty | Per-client tokens and scopes |
+| `MCP_REQUIRE_AUTH` | `true` | Require auth for HTTP |
+| `MCP_ALLOW_UNAUTHENTICATED_HTTP` | `false` | Explicit emergency opt-out |
+| `MCP_TRUST_STDIO` | `true` | Trust locally spawned stdio clients |
+| `HOST` / `PORT` | `127.0.0.1` / `8000` | HTTP bind address and port |
+| `ICLOUD_EMAIL(_FILE)` | empty | iCloud account |
+| `ICLOUD_APP_SPECIFIC_PASSWORD(_FILE)` | empty | Apple app password |
+| `ICLOUD_ALLOW_HEADER_CREDENTIALS` | `false` | Permit per-request Apple credentials |
+| `EMAIL_SEND_ALLOWLIST` | empty | Exact comma-separated recipients; applies to SMTP and calendar invitations |
+| `ENABLE_CALENDAR_WRITE` | `true` | Create/update calendar events |
+| `ENABLE_CALENDAR_DELETE` | `false` | Delete calendar events |
+| `ENABLE_CALENDAR_INVITATIONS` | `false` | Send iTIP invitations/cancellations; also requires `mail:send` |
+| `ENABLE_CONTACTS_WRITE` | `true` | Create/update contacts |
+| `ENABLE_CONTACTS_DELETE` | `false` | Delete contacts |
+| `ENABLE_MAIL_WRITE` | `true` | Move mail or change read state |
+| `ENABLE_MAIL_DELETE` | `false` | Move mail to trash/delete |
+| `ENABLE_PERMANENT_MAIL_DELETE` | `false` | Permanently expunge mail |
+| `ENABLE_MAIL_SEND` | `true` | Send SMTP mail and iTIP invitations |
+| `RESOURCE_ID_SIGNING_KEY(_FILE)` | empty | Return HMAC-signed opaque DAV IDs |
+| `ALLOW_LEGACY_URL_IDS` | `true` | Accept old raw URL IDs during migration |
+| `AUDIT_LOG_ENABLED` | `true` | JSON authorization audit events to stderr |
+| `AUDIT_HMAC_KEY(_FILE)` | built-in fallback | Stable, private hashes for audit targets |
+| `IDEMPOTENCY_STORE_PATH` | `/tmp/icloud-mcp-idempotency.sqlite3` | SQLite replay store |
+| `IDEMPOTENCY_TTL_SECONDS` | `86400` | Idempotency retention |
+| `HTTP_TIMEOUT` | `30` | Outbound network timeout |
+| `DEFAULT_TZ` | system timezone | Zone for naive calendar timestamps |
+| `CALDAV_SERVER` | Apple CalDAV | CalDAV base URL |
+| `CARDDAV_SERVER` | Apple CardDAV | CardDAV base URL |
+| `IMAP_SERVER` / `IMAP_PORT` | Apple / `993` | IMAP endpoint |
+| `SMTP_SERVER` / `SMTP_PORT` | Apple / `587` | SMTP endpoint |
+| `CALDAV_ALLOWED_HOSTS` | Apple CalDAV hosts | Exact/wildcard credential egress policy |
+| `CARDDAV_ALLOWED_HOSTS` | Apple CardDAV hosts | Exact/wildcard credential egress policy |
 
-```env
-# iCloud Credentials (fallback if not in headers)
-ICLOUD_EMAIL=your-email@icloud.com
-ICLOUD_APP_SPECIFIC_PASSWORD=xxxx-xxxx-xxxx-xxxx
+For persistent idempotency across container recreation, mount a writable
+directory and point `IDEMPOTENCY_STORE_PATH` into it. The default stays in the
+ephemeral tmpfs so the rest of the container can remain read-only.
 
-# iCloud Servers (optional, defaults to standard iCloud servers)
-CALDAV_SERVER=https://caldav.icloud.com
-CARDDAV_SERVER=https://contacts.icloud.com
-IMAP_SERVER=imap.mail.me.com
-SMTP_SERVER=smtp.mail.me.com
+## Signed ID migration
 
-# Server Configuration
-MCP_SERVER_PORT=8000
-IMAP_PORT=993
-SMTP_PORT=587
+Set `RESOURCE_ID_SIGNING_KEY_FILE` to make newly returned Calendar and Contact
+IDs opaque and tamper-evident. Existing raw URL IDs remain accepted while
+`ALLOW_LEGACY_URL_IDS=true`, so old agents continue to work. Once all clients
+have refreshed their IDs, set it to `false`.
 
-# HTTP transport access control (see Security Considerations)
-MCP_AUTH_TOKEN=
-HOST=127.0.0.1
-HTTP_TIMEOUT=30
-EMAIL_SEND_ALLOWLIST=
-```
+## Security notes
 
-| Variable | Description |
-|---|---|
-| `MCP_AUTH_TOKEN` | Bearer token required on the HTTP transport. Unset by default, which leaves the HTTP transport unauthenticated. |
-| `HOST` | Bind address for the HTTP transport. Defaults to `127.0.0.1` (local only). |
-| `HTTP_TIMEOUT` | Timeout in seconds for outbound IMAP/SMTP/CalDAV/CardDAV calls. Defaults to `30`. |
-| `EMAIL_SEND_ALLOWLIST` | Comma-separated recipient addresses `email_send` is permitted to use. Empty (default) allows any recipient. |
+- Never expose plain HTTP over the public Internet. Put the endpoint behind a
+  TLS reverse proxy or a private overlay network.
+- Apple credentials are server-side by default. Header credentials are opt-in
+  because a shared HTTP service should not accept arbitrary Apple passwords.
+- DAV resource URLs are restricted to the configured HTTPS host patterns and
+  port 443 before credentials are sent.
+- Audit records contain client IDs, authorization decisions, scopes, and keyed target hashes;
+  they do not contain bearer tokens, Apple passwords, message bodies, or event
+  contents.
+- Empty `EMAIL_SEND_ALLOWLIST` preserves upstream behavior and allows every
+  recipient. Configure it when agents must only contact known addresses.
 
-### Authentication
-
-**iCloud credentials** - the server supports two methods, checked in order:
-
-1. **Request Headers** (recommended for multi-user scenarios):
-   - `X-Apple-Email`: iCloud email address
-   - `X-Apple-App-Specific-Password`: App-specific password
-
-2. **Environment Variables** (fallback):
-   - `ICLOUD_EMAIL`
-   - `ICLOUD_APP_SPECIFIC_PASSWORD`
-
-If credentials are not found in either location, the server returns a 401 error. Credentials are held only for the duration of the request that uses them - they are not cached or persisted server-side.
-
-**MCP client access (HTTP transport)** - by default the HTTP transport accepts requests from anyone who can reach it, with no login of any kind. Set `MCP_AUTH_TOKEN` to require a `Bearer <token>` header on every request; without it, any client that can open a TCP connection to the server can call every tool, including `email_send`. See [Security Considerations](#security-considerations).
-
-## Usage
-
-### Local Usage (stdio transport)
-
-```bash
-# Using Python directly
-python run.py
-
-# Or using the module
-python -m icloud_mcp.server
-```
-
-### Server Usage (Streamable HTTP transport)
-
-```bash
-# Using Python
-python run.py --http --port 8000
-
-# Using Docker Compose
-docker-compose up
-```
-
-The server will be available at `http://localhost:8000/mcp`.
-
-By default it binds to `127.0.0.1` and accepts unauthenticated requests. Read [Security Considerations](#security-considerations) before binding it to anything other than localhost.
-
-## Integration with Claude Desktop
-
-This method allows Claude Desktop to directly launch the MCP server as a subprocess.
-
-**Step 1:** Install dependencies locally:
-```bash
-pip install -e .
-```
-
-**Step 2:** Create a `.env` file with your credentials:
-```bash
-cp .env.example .env
-# Edit .env and add your iCloud credentials
-```
-
-**Step 3:** Find your Claude Desktop configuration file:
-
-- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-- **Linux**: `~/.config/Claude/claude_desktop_config.json`
-
-**Step 4:** Add this configuration (replace the path):
-
-```json
-{
-  "mcpServers": {
-    "icloud": {
-      "command": "python",
-      "args": ["/absolute/path/to/icloud-mcp/run.py"],
-      "network": {
-        "enabled": true,
-        "allowedDomains": [
-          "caldav.icloud.com",
-          "contacts.icloud.com",
-          "*.contacts.icloud.com",
-          "imap.mail.me.com",
-          "smtp.mail.me.com"
-        ]
-      }
-    }
-  }
-}
-```
-
-**Important:** Replace `/absolute/path/to/icloud-mcp/` with the actual full path to your project directory.
-
-**Example on macOS:**
-```json
-{
-  "mcpServers": {
-    "icloud": {
-      "command": "python",
-      "args": ["/Users/username/Projects/icloud-mcp/run.py"],
-      "network": {
-        "enabled": true,
-        "allowedDomains": [
-          "caldav.icloud.com",
-          "contacts.icloud.com",
-          "*.contacts.icloud.com",
-          "imap.mail.me.com",
-          "smtp.mail.me.com"
-        ]
-      }
-    }
-  }
-}
-```
-
-**Note:** The `network.allowedDomains` configuration is **required** for contacts to work properly, as the server needs to access iCloud's CardDAV servers.
-
-**Step 5:** Restart Claude Desktop completely (Quit and reopen)
-
-### Verification
-
-After restarting Claude Desktop:
-
-1. Open Claude Desktop application
-2. Look for the 🔨 (tools/hammer) icon in the bottom-right corner
-3. You should see "icloud" server listed with green status
-4. Try commands like:
-   - "List my calendars"
-   - "Show my contacts"
-   - "Get my unread emails"
-
-### Troubleshooting
-
-**Server doesn't appear:**
-- Check JSON syntax in config file (use a JSON validator)
-- View logs: Help → Show Logs in Claude Desktop
-- Verify the path to `run.py` is absolute (not relative)
-- Ensure Python is in your PATH
-- Check that you're using Python 3.10-3.12 (not 3.13+)
-
-**401 Authentication errors:**
-- Ensure you're using an **App-Specific Password**, not your regular Apple password
-- Generate one at: https://appleid.apple.com/account/manage
-- Check `.env` file has correct credentials
-
-**Contacts not working (empty results or errors):**
-- Ensure you've added the `network.allowedDomains` configuration to Claude Desktop config
-- The domains `contacts.icloud.com` and `*.contacts.icloud.com` must be in the allowed list
-- Restart Claude Desktop after updating the config
-
-**Tools fail with 500 errors:**
-- Check server logs for details
-- Verify iCloud credentials are valid
-- Ensure network connectivity to iCloud servers
-
-## Architecture
-
-### Stateless Design
-
-The server is fully stateless:
-- No sessions or state stored between requests
-- Each request contains all necessary authentication information
-- Connections to iCloud services are created per-request and closed immediately
-- Perfect for horizontal scaling and serverless deployments
-
-### Technical Implementation
-
-- **Transport**: Streamable HTTP protocol with `/mcp` endpoint
-- **Calendar (CalDAV)**: Uses `caldav` library for standard CalDAV operations
-- **Contacts (CardDAV)**: Direct HTTP/WebDAV implementation using `requests` with proper RFC 6352 CardDAV protocol
-- **Email (IMAP/SMTP)**: Uses `imapclient` for IMAP and standard `smtplib` for SMTP
-- **Authentication**: Headers via `get_http_headers()` with environment variable fallback
-
-### Security Considerations
-
-- **`network.allowedDomains` applies only to the stdio subprocess Claude Desktop launches**, and is enforced by Claude Desktop itself (see [Claude Desktop integration](#integration-with-claude-desktop)). The Streamable HTTP transport has no equivalent: a running HTTP server can reach any host the machine can reach.
-- **The HTTP transport is unauthenticated unless you set `MCP_AUTH_TOKEN`.** With it set, every request must carry a matching `Bearer <token>` header; without it, anyone who can reach the port can call every tool, including `email_send`.
-- By default the server binds to `127.0.0.1` only (set `HOST` to change this). `docker-compose.yml` publishes the port on `127.0.0.1` only, so the container is not reachable from other machines out of the box.
-- If you need to expose the server beyond localhost, you must set `MCP_AUTH_TOKEN`, and you should put it behind a reverse proxy with TLS - the server itself does not terminate TLS.
-- iCloud credentials (email and app-specific password) are held only for the duration of each request; they are not cached, logged, or persisted server-side.
-- Store App-Specific Passwords securely (use secret management tools) and never commit the `.env` file to version control.
-- Consider header-based iCloud credentials (`X-Apple-Email` / `X-Apple-App-Specific-Password`) for multi-user scenarios instead of a single shared `.env`.
-
-## Development
-
-### Project Structure
-
-```
-icloud-mcp/
-├── src/
-│   └── icloud_mcp/
-│       ├── __init__.py
-│       ├── config.py       # Configuration management
-│       ├── auth.py         # Authentication handling
-│       ├── calendar.py     # CalDAV tools
-│       ├── contacts.py     # CardDAV tools (direct HTTP/WebDAV)
-│       ├── email.py        # IMAP/SMTP tools
-│       └── server.py       # FastMCP server and tool registration
-├── .env.example            # Example environment configuration
-├── .gitignore
-├── Dockerfile
-├── docker-compose.yml
-├── pyproject.toml          # Python project configuration and dependencies
-├── run.py                  # Entry point script
-└── README.md
-```
-
-### Running Tests
+## Local development
 
 ```bash
-# Install development dependencies
-pip install -e ".[dev]"
-
-# Run tests (when added)
-pytest
+uv sync --frozen --extra dev --python 3.12
+uv run pytest -q
+uv run ruff check src tests
+docker build -t icloud-mcp:dev .
 ```
 
-### Code Formatting
+The dependency graph is committed in `uv.lock`. CI tests Python 3.12 and
+publishes signed-provenance multi-platform images from the fork's `main`
+branch.
 
-```bash
-# Format code
-black src/
+## Upstream compatibility
 
-# Lint code
-ruff check src/
-```
+This branch contains PR #22 as its first four commits, followed by isolated
+hardening and packaging commits. Existing tool names and original arguments are
+unchanged; additive parameters are optional. `MCP_AUTH_TOKEN`, raw URL IDs,
+and stdio operation remain available for migration and upstream merges.
 
-## License
-
-MIT License - See LICENSE file for details
-
-## Contributing
-
-Contributions are welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
-## Support
-
-For issues and questions:
-- Open an issue on GitHub
-- Check existing issues for solutions
-- Review iCloud API documentation
-
-## Acknowledgments
-
-Built with:
-- [FastMCP](https://github.com/jlowin/fastmcp) - MCP server framework
-- [caldav](https://github.com/python-caldav/caldav) - CalDAV library for calendar operations
-- [requests](https://github.com/psf/requests) - HTTP library for CardDAV operations
-- [IMAPClient](https://github.com/mjs/imapclient) - IMAP library
-- [vobject](https://github.com/py-vobject/vobject) - vCard/iCalendar parsing
+MIT licensed; see `LICENSE`.
