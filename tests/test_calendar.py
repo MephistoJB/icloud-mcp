@@ -25,6 +25,12 @@ def test_event_base_url_no_port():
     assert "secret" not in base and "attacker" not in base
 
 
+def test_caldav_client_disables_http3(monkeypatch):
+    monkeypatch.setattr(cal.config, "DISABLE_HTTP3", True)
+    client = cal._get_caldav_client("person@example.com", "secret")
+    assert client.session.adapters["https://"]._disable_http3 is True
+
+
 # --- test 6: create vs update DTSTART parity for naive input --------------
 
 @pytest.mark.parametrize("tzname", ["America/New_York", "Europe/Moscow", "UTC"])

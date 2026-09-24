@@ -119,6 +119,7 @@ a same-named `_FILE` variant, such as
 | `IDEMPOTENCY_STORE_PATH` | `/tmp/icloud-mcp-idempotency.sqlite3` | SQLite replay store |
 | `IDEMPOTENCY_TTL_SECONDS` | `86400` | Idempotency retention |
 | `HTTP_TIMEOUT` | `30` | Outbound network timeout |
+| `DISABLE_HTTP3` | `true` | Use HTTP/1.1 or HTTP/2 for NAS/kernel compatibility |
 | `DEFAULT_TZ` | system timezone | Zone for naive calendar timestamps |
 | `CALDAV_SERVER` | Apple CalDAV | CalDAV base URL |
 | `CARDDAV_SERVER` | Apple CardDAV | CardDAV base URL |

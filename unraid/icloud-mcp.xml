@@ -41,4 +41,5 @@
   <Config Name="Audit HMAC Key" Target="AUDIT_HMAC_KEY" Default="" Mode="" Description="Secret key used to pseudonymize audit targets consistently." Type="Variable" Display="advanced" Required="false" Mask="true"/>
   <Config Name="Idempotency Database" Target="IDEMPOTENCY_STORE_PATH" Default="/data/idempotency.sqlite3" Mode="" Description="Persistent retry-protection database inside the mapped data path." Type="Variable" Display="advanced" Required="true" Mask="false">/data/idempotency.sqlite3</Config>
   <Config Name="HTTP Timeout" Target="HTTP_TIMEOUT" Default="30" Mode="" Description="Outbound timeout in seconds." Type="Variable" Display="advanced" Required="true" Mask="false">30</Config>
+  <Config Name="Disable HTTP/3" Target="DISABLE_HTTP3" Default="true" Mode="" Description="Use HTTP/1.1 or HTTP/2 for compatibility with Unraid and NAS kernels." Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
 </Container>

@@ -96,6 +96,7 @@ class Config:
     SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
     SENT_FOLDER = os.getenv("SENT_FOLDER", "Sent Messages")
     HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "30"))
+    DISABLE_HTTP3 = _bool("DISABLE_HTTP3", True)
     MCP_BIND_HOST = os.getenv("HOST", "127.0.0.1")
 
     MCP_CLIENTS = _load_clients()

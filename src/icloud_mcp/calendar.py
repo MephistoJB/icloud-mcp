@@ -2,6 +2,7 @@
 
 import anyio
 import caldav
+import niquests
 import functools
 import os
 import re
@@ -24,12 +25,18 @@ logger = logging.getLogger(__name__)
 
 def _get_caldav_client(email: str, password: str) -> caldav.DAVClient:
     """Create CalDAV client (stateless)."""
-    return caldav.DAVClient(
+    client = caldav.DAVClient(
         url=config.CALDAV_SERVER,
         username=email,
         password=password,
         timeout=config.HTTP_TIMEOUT,
     )
+    # caldav uses niquests, which enables HTTP/3 by default. Some NAS kernels
+    # lack the UDP GRO support its QUIC backend expects and fail with EMSGSIZE
+    # before a request reaches Apple. HTTP/1.1 and HTTP/2 remain available.
+    if config.DISABLE_HTTP3:
+        client.session = niquests.Session(disable_http3=True)
+    return client
 
 
 async def _to_thread(fn, *args, **kwargs):

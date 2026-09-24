@@ -5,6 +5,7 @@ import functools
 import anyio
 import requests
 from requests.auth import HTTPBasicAuth
+from urllib3.backend import HttpVersion
 import vobject
 from typing import List, Dict, Any, Optional
 from fastmcp import Context
@@ -15,6 +16,14 @@ from urllib.parse import urljoin
 import uuid
 
 logger = logging.getLogger(__name__)
+
+
+class _NoHTTP3Adapter(requests.adapters.HTTPAdapter):
+    """Requests adapter that leaves HTTP/1.1 and HTTP/2 enabled."""
+
+    def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+        pool_kwargs["disabled_svn"] = {HttpVersion.h3}
+        return super().init_poolmanager(connections, maxsize, block, **pool_kwargs)
 
 
 def _require_trusted_contact_url(contact_id: str) -> None:
@@ -102,6 +111,8 @@ def _parse_vcard_contact(vcard, contact_id: str) -> Dict[str, Any]:
 def _get_carddav_session(email: str, password: str) -> tuple:
     """Create authenticated session for CardDAV (stateless)."""
     session = requests.Session()
+    if config.DISABLE_HTTP3:
+        session.mount('https://', _NoHTTP3Adapter())
     session.auth = HTTPBasicAuth(email, password)
     session.headers.update({
         'Content-Type': 'text/xml; charset=utf-8',
