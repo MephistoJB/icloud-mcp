@@ -38,6 +38,7 @@
   <Config Name="Signed Resource Key" Target="RESOURCE_ID_SIGNING_KEY" Default="" Mode="" Description="Optional HMAC key for opaque signed Calendar/Contact IDs." Type="Variable" Display="advanced" Required="false" Mask="true"/>
   <Config Name="Allow Legacy URL IDs" Target="ALLOW_LEGACY_URL_IDS" Default="true" Mode="" Description="Keep true during migration; set false after all agents use signed IDs." Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
   <Config Name="Audit Logging" Target="AUDIT_LOG_ENABLED" Default="true" Mode="" Description="Structured authorization audit events on container stderr." Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
+  <Config Name="Audit HMAC Key" Target="AUDIT_HMAC_KEY" Default="" Mode="" Description="Secret key used to pseudonymize audit targets consistently." Type="Variable" Display="advanced" Required="false" Mask="true"/>
   <Config Name="Idempotency Database" Target="IDEMPOTENCY_STORE_PATH" Default="/data/idempotency.sqlite3" Mode="" Description="Persistent retry-protection database inside the mapped data path." Type="Variable" Display="advanced" Required="true" Mask="false">/data/idempotency.sqlite3</Config>
   <Config Name="HTTP Timeout" Target="HTTP_TIMEOUT" Default="30" Mode="" Description="Outbound timeout in seconds." Type="Variable" Display="advanced" Required="true" Mask="false">30</Config>
 </Container>
