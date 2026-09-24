@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <Container version="2">
-  <Name>iCloud-MCP</Name>
+  <Name>icloud-mcp</Name>
   <Repository>ghcr.io/mephistojb/icloud-mcp:latest</Repository>
   <Registry>https://github.com/MephistoJB/icloud-mcp/pkgs/container/icloud-mcp</Registry>
   <Network>bridge</Network>
