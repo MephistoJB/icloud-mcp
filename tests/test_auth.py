@@ -3,7 +3,12 @@
 import pytest
 
 from icloud_mcp import auth
-from icloud_mcp.auth import require_trusted_url, get_credentials, AuthenticationError
+from icloud_mcp.auth import (
+    AuthenticationError,
+    get_credentials,
+    require_mail_auth,
+    require_trusted_url,
+)
 from icloud_mcp.config import config
 
 BASE = "https://caldav.icloud.com"
@@ -133,3 +138,10 @@ def test_incomplete_env_raises(monkeypatch):
     monkeypatch.setattr(config, "FALLBACK_PASSWORD", None)
     with pytest.raises(AuthenticationError):
         get_credentials(None)
+
+
+def test_mail_credentials_can_use_distinct_mailbox(monkeypatch):
+    _set_headers(monkeypatch, {})
+    monkeypatch.setattr(config, "MAIL_EMAIL", "mailbox@icloud.com")
+    monkeypatch.setattr(config, "MAIL_PASSWORD", "mail-app-secret")
+    assert require_mail_auth(None) == ("mailbox@icloud.com", "mail-app-secret")

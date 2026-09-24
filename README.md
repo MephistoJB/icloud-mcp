@@ -101,6 +101,8 @@ a same-named `_FILE` variant, such as
 | `HOST` / `PORT` | `127.0.0.1` / `8000` | HTTP bind address and port |
 | `ICLOUD_EMAIL(_FILE)` | empty | iCloud account |
 | `ICLOUD_APP_SPECIFIC_PASSWORD(_FILE)` | empty | Apple app password |
+| `ICLOUD_MAIL_EMAIL(_FILE)` | iCloud account | Actual iCloud Mail address when the Apple ID uses another address |
+| `ICLOUD_MAIL_APP_SPECIFIC_PASSWORD(_FILE)` | Apple app password | Optional separate app password for iCloud Mail |
 | `ICLOUD_ALLOW_HEADER_CREDENTIALS` | `false` | Permit per-request Apple credentials |
 | `EMAIL_SEND_ALLOWLIST` | empty | Exact comma-separated recipients; applies to SMTP and calendar invitations |
 | `ENABLE_CALENDAR_WRITE` | `true` | Create/update calendar events |

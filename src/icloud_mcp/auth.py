@@ -132,3 +132,18 @@ def get_credentials(context: Context) -> Tuple[str, str]:
 
 def require_auth(context: Context) -> Tuple[str, str]:
     return get_credentials(context)
+
+
+def require_mail_auth(context: Context) -> Tuple[str, str]:
+    """Return optional mail-specific credentials, falling back to Apple ID.
+
+    An Apple ID can use a third-party address while iCloud Mail requires the
+    actual @icloud.com mailbox name. Keeping these identities separate lets
+    CalDAV/CardDAV continue to use the Apple ID.
+    """
+    headers = get_http_headers()
+    if "x-apple-email" in headers or "x-apple-app-specific-password" in headers:
+        return get_credentials(context)
+    if not config.MAIL_EMAIL or not config.MAIL_PASSWORD:
+        raise AuthenticationError("iCloud Mail credentials are not configured")
+    return config.MAIL_EMAIL, config.MAIL_PASSWORD

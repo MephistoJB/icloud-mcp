@@ -78,7 +78,7 @@ class FakeSentIMAP:
 
 @pytest.fixture
 def patch_auth(monkeypatch):
-    monkeypatch.setattr(email_mod, "require_auth", lambda ctx: ("me@icloud.com", "pw"))
+    monkeypatch.setattr(email_mod, "require_mail_auth", lambda ctx: ("me@icloud.com", "pw"))
 
 
 @pytest.mark.parametrize("bad_limit", [0, -5, None])

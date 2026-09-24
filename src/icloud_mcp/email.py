@@ -16,7 +16,7 @@ from email.utils import getaddresses
 from typing import List, Dict, Any, Optional
 from fastmcp import Context
 from imapclient import IMAPClient
-from .auth import require_auth, require_recipient_allowed
+from .auth import require_mail_auth, require_recipient_allowed
 from .config import config
 
 # Configure minimal logging (only errors)
@@ -155,7 +155,7 @@ async def list_folders(context: Context) -> List[Dict[str, Any]]:
         List of folders with name and flags
     """
     try:
-        username, password = require_auth(context)
+        username, password = require_mail_auth(context)
 
         client = await _run(_get_imap_client, username, password)
 
@@ -202,7 +202,7 @@ async def list_messages(
             limit = 20
         limit = min(limit, 200)
 
-        username, password = require_auth(context)
+        username, password = require_mail_auth(context)
 
         client = await _run(_get_imap_client, username, password)
 
@@ -305,7 +305,7 @@ async def get_message(
         Complete message details
     """
     try:
-        username, password = require_auth(context)
+        username, password = require_mail_auth(context)
         client = await _run(_get_imap_client, username, password)
 
         await _run(client.select_folder, folder)
@@ -406,7 +406,7 @@ async def get_messages(
         List of message details
     """
     try:
-        username, password = require_auth(context)
+        username, password = require_mail_auth(context)
         client = await _run(_get_imap_client, username, password)
 
         await _run(client.select_folder, folder)
@@ -522,7 +522,7 @@ async def search_messages(
         limit = 20
     limit = min(limit, 200)
 
-    username, password = require_auth(context)
+    username, password = require_mail_auth(context)
     client = await _run(_get_imap_client, username, password)
 
     try:
@@ -702,7 +702,7 @@ async def send_message(
     Returns:
         Confirmation message
     """
-    username, password = require_auth(context)
+    username, password = require_mail_auth(context)
 
     # Create message
     msg = MIMEMultipart('alternative') if html else MIMEText(body)
@@ -825,7 +825,7 @@ async def move_message(
     Returns:
         Confirmation message
     """
-    username, password = require_auth(context)
+    username, password = require_mail_auth(context)
 
     client = await _run(_get_imap_client, username, password)
 
@@ -878,7 +878,7 @@ async def delete_message(
     Returns:
         Confirmation message
     """
-    username, password = require_auth(context)
+    username, password = require_mail_auth(context)
 
     client = await _run(_get_imap_client, username, password)
 
@@ -938,7 +938,7 @@ async def mark_as_read(
     Returns:
         Confirmation message
     """
-    username, password = require_auth(context)
+    username, password = require_mail_auth(context)
 
     client = await _run(_get_imap_client, username, password)
 
@@ -972,7 +972,7 @@ async def mark_as_unread(
     Returns:
         Confirmation message
     """
-    username, password = require_auth(context)
+    username, password = require_mail_auth(context)
 
     client = await _run(_get_imap_client, username, password)
 
