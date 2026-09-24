@@ -47,6 +47,8 @@ when neither `MCP_AUTH_TOKEN` nor `MCP_CLIENTS_JSON` is configured.
 The template applies `--read-only`, `--cap-drop=ALL`,
 `no-new-privileges`, a bounded `/tmp` tmpfs, and runs as UID/GID 10001.
 The published GHCR image supports AMD64 and ARM64.
+Its only writable persistent path is `/mnt/user/appdata/icloud-mcp` mapped to
+`/data`; include that directory in the normal Unraid appdata backup.
 
 ## Per-agent access
 

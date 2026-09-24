@@ -19,6 +19,7 @@
   <DonateLink/>
   <Requires>An Apple app-specific password. Use a reverse proxy with TLS when the MCP endpoint crosses a trusted LAN boundary.</Requires>
   <Config Name="MCP Port" Target="8000" Default="8000" Mode="tcp" Description="Streamable HTTP endpoint is /mcp." Type="Port" Display="always" Required="true" Mask="false">8000</Config>
+  <Config Name="Persistent Data" Target="/data" Default="/mnt/user/appdata/icloud-mcp" Mode="rw" Description="Idempotency database; include this path in normal appdata backups." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/icloud-mcp</Config>
   <Config Name="MCP Bearer Token" Target="MCP_AUTH_TOKEN" Default="" Mode="" Description="Long random compatibility token. For per-agent scopes use MCP Clients JSON instead." Type="Variable" Display="always" Required="false" Mask="true"/>
   <Config Name="MCP Clients JSON" Target="MCP_CLIENTS_JSON" Default="" Mode="" Description="Scoped clients, e.g. [{&amp;quot;id&amp;quot;:&amp;quot;reader&amp;quot;,&amp;quot;token&amp;quot;:&amp;quot;...&amp;quot;,&amp;quot;scopes&amp;quot;:[&amp;quot;mail:read&amp;quot;]}]." Type="Variable" Display="advanced" Required="false" Mask="true"/>
   <Config Name="iCloud Email" Target="ICLOUD_EMAIL" Default="" Mode="" Description="Apple/iCloud account email." Type="Variable" Display="always" Required="true" Mask="false"/>
@@ -37,5 +38,6 @@
   <Config Name="Signed Resource Key" Target="RESOURCE_ID_SIGNING_KEY" Default="" Mode="" Description="Optional HMAC key for opaque signed Calendar/Contact IDs." Type="Variable" Display="advanced" Required="false" Mask="true"/>
   <Config Name="Allow Legacy URL IDs" Target="ALLOW_LEGACY_URL_IDS" Default="true" Mode="" Description="Keep true during migration; set false after all agents use signed IDs." Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
   <Config Name="Audit Logging" Target="AUDIT_LOG_ENABLED" Default="true" Mode="" Description="Structured authorization audit events on container stderr." Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
+  <Config Name="Idempotency Database" Target="IDEMPOTENCY_STORE_PATH" Default="/data/idempotency.sqlite3" Mode="" Description="Persistent retry-protection database inside the mapped data path." Type="Variable" Display="advanced" Required="true" Mask="false">/data/idempotency.sqlite3</Config>
   <Config Name="HTTP Timeout" Target="HTTP_TIMEOUT" Default="30" Mode="" Description="Outbound timeout in seconds." Type="Variable" Display="advanced" Required="true" Mask="false">30</Config>
 </Container>
