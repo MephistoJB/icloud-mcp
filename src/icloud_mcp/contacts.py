@@ -9,7 +9,7 @@ from urllib3.backend import HttpVersion
 import vobject
 from typing import List, Dict, Any, Optional
 from fastmcp import Context
-from .auth import require_auth, require_trusted_url
+from .auth import require_contacts_auth, require_trusted_url
 from .config import config
 import xml.etree.ElementTree as ET
 from urllib.parse import urljoin
@@ -293,7 +293,7 @@ async def list_contacts(
     Returns:
         List of contacts with name, phone, email, address and birthday
     """
-    email, password = require_auth(context)
+    email, password = require_contacts_auth(context)
     session, _ = _get_carddav_session(email, password)
     
     try:
@@ -387,7 +387,7 @@ async def get_contact(context: Context, contact_id: str) -> Dict[str, Any]:
     Returns:
         Contact details
     """
-    email, password = require_auth(context)
+    email, password = require_contacts_auth(context)
     _require_trusted_contact_url(contact_id)
     session, _ = _get_carddav_session(email, password)
 
@@ -425,7 +425,7 @@ async def create_contact(
     Returns:
         Created contact details
     """
-    email, password = require_auth(context)
+    email, password = require_contacts_auth(context)
     session, _ = _get_carddav_session(email, password)
     
     try:
@@ -536,7 +536,7 @@ async def update_contact(
     Returns:
         Updated contact details
     """
-    email, password = require_auth(context)
+    email, password = require_contacts_auth(context)
     _require_trusted_contact_url(contact_id)
     session, _ = _get_carddav_session(email, password)
 
@@ -645,7 +645,7 @@ async def delete_contact(context: Context, contact_id: str) -> Dict[str, str]:
     Returns:
         Confirmation message
     """
-    email, password = require_auth(context)
+    email, password = require_contacts_auth(context)
     _require_trusted_contact_url(contact_id)
     session, _ = _get_carddav_session(email, password)
 

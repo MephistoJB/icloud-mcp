@@ -6,6 +6,7 @@ from icloud_mcp import auth
 from icloud_mcp.auth import (
     AuthenticationError,
     get_credentials,
+    require_contacts_auth,
     require_mail_auth,
     require_trusted_url,
 )
@@ -145,3 +146,54 @@ def test_mail_credentials_can_use_distinct_mailbox(monkeypatch):
     monkeypatch.setattr(config, "MAIL_EMAIL", "mailbox@icloud.com")
     monkeypatch.setattr(config, "MAIL_PASSWORD", "mail-app-secret")
     assert require_mail_auth(None) == ("mailbox@icloud.com", "mail-app-secret")
+
+
+def test_contacts_account_keeps_calendar_and_mail_credentials_separate(monkeypatch):
+    _set_headers(monkeypatch, {})
+    monkeypatch.setattr(config, "FALLBACK_EMAIL", "calendar@icloud.com")
+    monkeypatch.setattr(config, "FALLBACK_PASSWORD", "calendar-secret")
+    monkeypatch.setattr(config, "MAIL_EMAIL", "mail@icloud.com")
+    monkeypatch.setattr(config, "MAIL_PASSWORD", "mail-secret")
+    monkeypatch.setattr(config, "CONTACTS_EMAIL", "contacts@icloud.com")
+    monkeypatch.setattr(config, "CONTACTS_PASSWORD", "contacts-secret")
+    assert require_contacts_auth(None) == ("contacts@icloud.com", "contacts-secret")
+    assert get_credentials(None) == ("calendar@icloud.com", "calendar-secret")
+    assert require_mail_auth(None) == ("mail@icloud.com", "mail-secret")
+
+
+def test_contacts_without_override_use_main_account(monkeypatch):
+    _set_headers(monkeypatch, {})
+    monkeypatch.setattr(config, "FALLBACK_EMAIL", "main@icloud.com")
+    monkeypatch.setattr(config, "FALLBACK_PASSWORD", "main-secret")
+    monkeypatch.setattr(config, "CONTACTS_EMAIL", None)
+    monkeypatch.setattr(config, "CONTACTS_PASSWORD", None)
+    assert require_contacts_auth(None) == ("main@icloud.com", "main-secret")
+
+
+@pytest.mark.parametrize("email,password", [("contacts@icloud.com", None), (None, "contacts-secret")])
+def test_partial_contacts_account_does_not_borrow_main_credentials(monkeypatch, email, password):
+    _set_headers(monkeypatch, {})
+    monkeypatch.setattr(config, "FALLBACK_EMAIL", "main@icloud.com")
+    monkeypatch.setattr(config, "FALLBACK_PASSWORD", "main-secret")
+    monkeypatch.setattr(config, "CONTACTS_EMAIL", email)
+    monkeypatch.setattr(config, "CONTACTS_PASSWORD", password)
+    with pytest.raises(AuthenticationError, match="Both ICLOUD_CONTACTS"):
+        require_contacts_auth(None)
+
+
+@pytest.mark.parametrize("allowed", [True, False])
+@pytest.mark.parametrize("headers", [
+    {"x-apple-email": "request@icloud.com", "x-apple-app-specific-password": "request-secret"},
+    {"x-apple-email": "request@icloud.com"},
+    {"x-apple-app-specific-password": "request-secret"},
+])
+def test_contacts_headers_preserve_opt_in_and_pair_isolation(monkeypatch, allowed, headers):
+    _set_headers(monkeypatch, headers)
+    monkeypatch.setattr(config, "ALLOW_HEADER_CREDENTIALS", allowed)
+    monkeypatch.setattr(config, "CONTACTS_EMAIL", "contacts@icloud.com")
+    monkeypatch.setattr(config, "CONTACTS_PASSWORD", "contacts-secret")
+    if allowed and len(headers) == 2:
+        assert require_contacts_auth(None) == ("request@icloud.com", "request-secret")
+    else:
+        with pytest.raises(AuthenticationError):
+            require_contacts_auth(None)

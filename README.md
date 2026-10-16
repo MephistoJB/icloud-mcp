@@ -107,6 +107,8 @@ a same-named `_FILE` variant, such as
 | `HOST` / `PORT` | `127.0.0.1` / `8000` | HTTP bind address and port |
 | `ICLOUD_EMAIL(_FILE)` | empty | iCloud account |
 | `ICLOUD_APP_SPECIFIC_PASSWORD(_FILE)` | empty | Apple app password |
+| `ICLOUD_CONTACTS_EMAIL(_FILE)` | empty | Optional separate Apple account for contacts |
+| `ICLOUD_CONTACTS_APP_SPECIFIC_PASSWORD(_FILE)` | empty | App password for the separate contacts account; set both contacts settings together |
 | `ICLOUD_MAIL_EMAIL(_FILE)` | iCloud account | Actual iCloud Mail address when the Apple ID uses another address |
 | `ICLOUD_MAIL_APP_SPECIFIC_PASSWORD(_FILE)` | Apple app password | Optional separate app password for iCloud Mail |
 | `ICLOUD_ALLOW_HEADER_CREDENTIALS` | `false` | Permit per-request Apple credentials |
@@ -139,6 +141,21 @@ a same-named `_FILE` variant, such as
 For persistent idempotency across container recreation, mount a writable
 directory and point `IDEMPOTENCY_STORE_PATH` into it. The default stays in the
 ephemeral tmpfs so the rest of the container can remain read-only.
+
+### Separate contacts account
+
+To read contacts and birthdays from another Apple account, set both
+`ICLOUD_CONTACTS_EMAIL` and `ICLOUD_CONTACTS_APP_SPECIFIC_PASSWORD` (or their
+`_FILE` variants). All contact operations, including create, update and delete,
+then use that account. Calendar and Mail retain their existing credentials.
+The existing contact scopes and write/delete switches still apply.
+
+When both contacts settings are empty, contacts use `ICLOUD_EMAIL` and
+`ICLOUD_APP_SPECIFIC_PASSWORD` as before. If only one contacts setting is
+provided, contact operations fail rather than combining credentials from
+different accounts. Explicit per-request Apple headers still take precedence
+when `ICLOUD_ALLOW_HEADER_CREDENTIALS=true`; they remain disabled by default.
+After switching accounts, refresh contact IDs from `contacts_list`.
 
 ## Signed ID migration
 

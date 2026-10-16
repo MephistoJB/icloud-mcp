@@ -134,6 +134,20 @@ def require_auth(context: Context) -> Tuple[str, str]:
     return get_credentials(context)
 
 
+def require_contacts_auth(context: Context) -> Tuple[str, str]:
+    """Use an optional contacts account without mixing account credentials."""
+    headers = get_http_headers()
+    if "x-apple-email" in headers or "x-apple-app-specific-password" in headers:
+        return get_credentials(context)
+    if config.CONTACTS_EMAIL or config.CONTACTS_PASSWORD:
+        if not config.CONTACTS_EMAIL or not config.CONTACTS_PASSWORD:
+            raise AuthenticationError(
+                "Both ICLOUD_CONTACTS_EMAIL and ICLOUD_CONTACTS_APP_SPECIFIC_PASSWORD are required"
+            )
+        return config.CONTACTS_EMAIL, config.CONTACTS_PASSWORD
+    return get_credentials(context)
+
+
 def require_mail_auth(context: Context) -> Tuple[str, str]:
     """Return optional mail-specific credentials, falling back to Apple ID.
 

@@ -7,7 +7,7 @@ import pytest
 
 from urllib3.backend import HttpVersion
 
-from icloud_mcp import contacts
+from icloud_mcp import auth, contacts
 
 
 def test_carddav_session_disables_http3(monkeypatch):
@@ -35,8 +35,17 @@ def test_birthday_in_contact_read_tools(monkeypatch, bday, expected):
     contact_id = "https://contacts.icloud.com/book/example.vcf"
     response = SimpleNamespace(text=card, raise_for_status=lambda: None)
     session = SimpleNamespace(get=lambda *args, **kwargs: response)
-    monkeypatch.setattr(contacts, "require_auth", lambda context: ("example@example.com", "test"))
-    monkeypatch.setattr(contacts, "_get_carddav_session", lambda *args: (session, "example@example.com"))
+    monkeypatch.setattr(auth, "get_http_headers", dict)
+    monkeypatch.setattr(contacts.config, "CONTACTS_EMAIL", "contacts@example.com")
+    monkeypatch.setattr(contacts.config, "CONTACTS_PASSWORD", "contacts-secret")
+    monkeypatch.setattr(contacts.config, "FALLBACK_EMAIL", "calendar@example.com")
+    monkeypatch.setattr(contacts.config, "FALLBACK_PASSWORD", "calendar-secret")
+
+    def carddav_session(email, password):
+        assert (email, password) == ("contacts@example.com", "contacts-secret")
+        return session, email
+
+    monkeypatch.setattr(contacts, "_get_carddav_session", carddav_session)
     monkeypatch.setattr(contacts, "_discover_principal", lambda *args: "principal")
     monkeypatch.setattr(contacts, "_discover_addressbook_home", lambda *args: "home")
     monkeypatch.setattr(contacts, "_list_addressbooks", lambda *args: [{"url": "book"}])
