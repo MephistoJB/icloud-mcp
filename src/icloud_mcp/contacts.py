@@ -81,6 +81,15 @@ def _remove_props_and_group_siblings(vcard, props) -> None:
             del vcard.contents[key]
 
 
+def _birthday(vcard) -> Optional[str]:
+    """Return BDAY as stored, preserving partial dates and unknown years."""
+    prop = getattr(vcard, 'bday', None)
+    if prop is None or prop.value is None:
+        return None
+    value = str(prop.value).strip()
+    return value or None
+
+
 def _parse_vcard_contact(vcard, contact_id: str) -> Dict[str, Any]:
     """Render a vobject vCard into the tool-facing contact dict."""
     contact = {
@@ -91,6 +100,7 @@ def _parse_vcard_contact(vcard, contact_id: str) -> Dict[str, Any]:
         "addresses": [],
         "organization": _primary_org(vcard),
         "title": str(vcard.title.value) if hasattr(vcard, 'title') else "",
+        "birthday": _birthday(vcard),
         "url": contact_id
     }
     if hasattr(vcard, 'tel_list'):
@@ -281,7 +291,7 @@ async def list_contacts(
         limit: Maximum number of contacts to return (optional)
 
     Returns:
-        List of contacts with name, phone, email, address
+        List of contacts with name, phone, email, address and birthday
     """
     email, password = require_auth(context)
     session, _ = _get_carddav_session(email, password)
@@ -321,6 +331,7 @@ async def list_contacts(
                     "phones": [],
                     "emails": [],
                     "addresses": [],
+                    "birthday": _birthday(vcard),
                     "url": vcard_data['url']
                 }
                 

@@ -21,6 +21,12 @@ events, idempotency, signed resource IDs, and an Unraid template.
 optional `request_id`. Repeating the same request ID and arguments returns the
 stored result without repeating the external action.
 
+`contacts_list`, `contacts_get`, and `contacts_search` include a read-only
+`birthday` field from the contact's vCard `BDAY` property. It is a string in
+the stored format (for example, `1985-04-12` or `--0412` without a year), or
+`null` when absent or empty. No birth year is inferred. Access uses the
+existing `contacts:read` scope.
+
 ## Quick start with Docker Compose
 
 Create an Apple app-specific password, then:
