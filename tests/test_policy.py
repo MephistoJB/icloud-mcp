@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from icloud_mcp import auth
+from icloud_mcp import auth, contacts, server
 from icloud_mcp.auth import AuthenticationError, AuthorizationError, require_scope
 from icloud_mcp.config import config
 from icloud_mcp.idempotency import run_once
@@ -98,3 +98,43 @@ def test_idempotency_rejects_key_reuse_with_different_payload(monkeypatch, tmp_p
     asyncio.run(run_once("agent", "send", "abc", {"to": "a@b.test"}, operation))
     with pytest.raises(ValueError):
         asyncio.run(run_once("agent", "send", "abc", {"to": "other@b.test"}, operation))
+
+
+def test_birthday_tool_requires_contact_read_scope_before_fetch(monkeypatch):
+    monkeypatch.setattr(auth, "get_access_token", lambda: SimpleNamespace(client_id="mail-reader", scopes=["mail:read"]))
+
+    async def unexpected_fetch(context):
+        pytest.fail("Unauthorized requests must not fetch contacts")
+
+    monkeypatch.setattr(contacts, "list_contacts", unexpected_fetch)
+    result = asyncio.run(server.contacts_birthdays(None, 10, 20))
+    assert result["status"] == 401
+
+
+def test_birthday_tool_returns_signed_ids_and_date_validation(monkeypatch):
+    monkeypatch.setattr(auth, "get_access_token", lambda: SimpleNamespace(client_id="contact-reader", scopes=["contacts:read"]))
+    monkeypatch.setattr(config, "RESOURCE_ID_SIGNING_KEY", "birthday-test-key")
+    original_id = "https://contacts.icloud.com/book/example.vcf"
+    calls = []
+
+    async def list_contacts(context):
+        calls.append(context)
+        return [{"id": original_id, "name": "Example", "birthday": "--1020"}]
+
+    monkeypatch.setattr(contacts, "list_contacts", list_contacts)
+    invalid = asyncio.run(server.contacts_birthdays(None, 4, 31))
+    assert invalid["status"] == 400
+    assert not calls
+    matches = asyncio.run(server.contacts_birthdays(None, 10, 20))
+    assert decode_resource_id(matches[0]["id"]) == original_id
+    assert set(matches[0]) == {"id", "name", "birthday"}
+
+
+def test_birthday_tool_does_not_report_fetch_failures_as_no_matches(monkeypatch):
+    monkeypatch.setattr(auth, "get_access_token", lambda: SimpleNamespace(client_id="contact-reader", scopes=["contacts:read"]))
+
+    async def failing_fetch(context):
+        raise ValueError("private provider failure details")
+
+    monkeypatch.setattr(contacts, "list_contacts", failing_fetch)
+    assert asyncio.run(server.contacts_birthdays(None, 10, 20)) == {"error": "Internal error", "status": 500}

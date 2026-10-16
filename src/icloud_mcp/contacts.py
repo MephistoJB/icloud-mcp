@@ -2,6 +2,8 @@
 
 import logging
 import functools
+import re
+from datetime import date
 import anyio
 import requests
 from requests.auth import HTTPBasicAuth
@@ -685,3 +687,49 @@ async def search_contacts(
     ]
     
     return filtered_contacts
+
+
+class InvalidBirthdayDate(ValueError):
+    """The requested month/day is not a valid birthday date."""
+
+
+def _birthday_month_day(value: Optional[str]) -> Optional[tuple[int, int]]:
+    """Read complete or yearless vCard dates without guessing free-text dates."""
+    if not value:
+        return None
+    value = value.strip()
+    if re.fullmatch(r"--[0-9]{2}-?[0-9]{2}", value):
+        compact = value[2:].replace("-", "")
+        year, month, day = 2000, int(compact[:2]), int(compact[2:])
+    else:
+        # BDAY may include a time; the birthday is its stored calendar date,
+        # independent of the querying client's timezone.
+        date_part = value.split("T", 1)[0]
+        if not re.fullmatch(r"[0-9]{8}|[0-9]{4}-[0-9]{2}-[0-9]{2}", date_part):
+            return None
+        compact = date_part.replace("-", "")
+        year, month, day = int(compact[:4]), int(compact[4:6]), int(compact[6:])
+    try:
+        parsed = date(year, month, day)
+    except ValueError:
+        return None
+    return parsed.month, parsed.day
+
+
+async def list_birthdays(context: Context, month: int, day: int) -> List[Dict[str, Any]]:
+    """Return only id, name and birthday for contacts born on this month/day."""
+    try:
+        if type(month) is not int or type(day) is not int:
+            raise ValueError
+        date(2000, month, day)  # Leap year permits February 29.
+    except ValueError:
+        raise InvalidBirthdayDate(
+            "month and day must form a valid calendar date; February 29 is supported"
+        ) from None
+    contacts = await list_contacts(context)
+    matches = [
+        {"id": contact["id"], "name": contact["name"], "birthday": contact["birthday"]}
+        for contact in contacts
+        if _birthday_month_day(contact.get("birthday")) == (month, day)
+    ]
+    return sorted(matches, key=lambda contact: contact["name"].casefold())

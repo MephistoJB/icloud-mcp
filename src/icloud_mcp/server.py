@@ -249,6 +249,30 @@ async def contacts_list(context: Context, limit: int | None = None) -> list | di
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=True))
+async def contacts_birthdays(context: Context, month: int, day: int) -> list | dict:
+    """Find birthdays on a month/day, ignoring birth year.
+
+    Args:
+        month: Calendar month, 1 through 12.
+        day: Day of month. February 29 is supported.
+
+    Returns only matching contacts' id, name and stored birthday, sorted by name.
+    Missing, invalid and free-text birthdays are skipped. An empty list means
+    no matches. Fetches fresh contacts on each call; no cache is used.
+    """
+    try:
+        require_scope(context, "contacts:read")
+        return encode_result(await contacts.list_birthdays(context, month, day))
+    except AuthenticationError as e:
+        return {"error": str(e), "status": 401}
+    except contacts.InvalidBirthdayDate as e:
+        return {"error": str(e), "status": 400}
+    except Exception:
+        logger.exception("Tool execution failed")
+        return {"error": "Internal error", "status": 500}
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=True))
 async def contacts_get(context: Context, contact_id: str) -> dict:
     """
     Get a specific contact by ID.

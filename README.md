@@ -11,7 +11,7 @@ events, idempotency, signed resource IDs, and an Unraid template.
 - Calendar: `calendar_list_calendars`, `calendar_list_events`,
   `calendar_search_events`, `calendar_create_event`,
   `calendar_update_event`, `calendar_delete_event`
-- Contacts: `contacts_list`, `contacts_get`, `contacts_search`,
+- Contacts: `contacts_list`, `contacts_get`, `contacts_search`, `contacts_birthdays`,
   `contacts_create`, `contacts_update`, `contacts_delete`
 - Mail: `email_list_folders`, `email_list_messages`, `email_get_message`,
   `email_get_messages`, `email_search`, `email_send`, `email_move`,
@@ -26,6 +26,15 @@ stored result without repeating the external action.
 the stored format (for example, `1985-04-12` or `--0412` without a year), or
 `null` when absent or empty. No birth year is inferred. Access uses the
 existing `contacts:read` scope.
+
+Use `contacts_birthdays(month=10, day=20)` to find everyone born on October 20,
+regardless of year. It returns only `id`, `name` and the stored `birthday`,
+sorted by name, or an empty list when nobody matches. Complete dates,
+yearless dates and dates with times are supported; missing, invalid or
+free-text birthdays are skipped. February 29 is supported; invalid query
+dates such as April 31 return status 400. The tool uses `contacts:read` and
+the configured contacts account. It loads fresh contacts on every call and
+filters on the server, so only matches are transmitted to the MCP client.
 
 ## Quick start with Docker Compose
 
