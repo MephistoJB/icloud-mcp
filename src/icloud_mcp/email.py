@@ -12,6 +12,8 @@ import anyio
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.header import decode_header
+from email.headerregistry import Address
+from email.errors import HeaderParseError
 from email.utils import getaddresses
 from typing import List, Dict, Any, Optional
 from fastmcp import Context
@@ -679,6 +681,28 @@ async def search_messages(
         except Exception as _e:
             pass
 
+def _select_from_address(username: str, from_address: Optional[str]) -> str:
+    """Authorize one bare ASCII mailbox; aliases belong to the configured account."""
+    sender = username if from_address is None else from_address
+    # Reject controls before parsing: email parsers can normalize folded headers.
+    if not sender or any(ord(c) < 33 or ord(c) > 126 for c in sender):
+        raise ValueError("from_address must be a single bare ASCII email address")
+    try:
+        address = Address(addr_spec=sender)
+        if not address.username or not address.domain or address.addr_spec != sender:
+            raise ValueError
+    except (ValueError, HeaderParseError, IndexError):
+        raise ValueError("from_address must be a single bare ASCII email address") from None
+    if sender.lower() == username.lower():
+        return sender
+    # Header credentials can select another account. A global alias list must
+    # never authorize that account to use the configured mailbox's aliases.
+    if (not config.MAIL_EMAIL or username.lower() != config.MAIL_EMAIL.lower()
+            or sender.lower() not in config.EMAIL_SEND_FROM_ALLOWLIST):
+        raise ValueError("from_address is not approved for this mail account")
+    return sender
+
+
 async def send_message(
     context: Context,
     to: str,
@@ -686,7 +710,8 @@ async def send_message(
     body: str,
     cc: Optional[str] = None,
     bcc: Optional[str] = None,
-    html: bool = False
+    html: bool = False,
+    from_address: Optional[str] = None
 ) -> Dict[str, str]:
     """
     Send an email message via SMTP.
@@ -698,16 +723,18 @@ async def send_message(
         cc: CC recipients (optional, comma-separated)
         bcc: BCC recipients (optional, comma-separated)
         html: Whether body is HTML (default: False)
+        from_address: Optional approved alias for the visible From header
 
     Returns:
         Confirmation message
     """
     username, password = require_mail_auth(context)
+    sender = _select_from_address(username, from_address)
 
     # Create message
     msg = MIMEMultipart('alternative') if html else MIMEText(body)
 
-    msg['From'] = username
+    msg['From'] = sender
     msg['To'] = to
     msg['Subject'] = subject
 
