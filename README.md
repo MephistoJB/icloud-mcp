@@ -14,7 +14,8 @@ events, idempotency, signed resource IDs, and an Unraid template.
 - Contacts: `contacts_list`, `contacts_get`, `contacts_search`, `contacts_birthdays`,
   `contacts_create`, `contacts_update`, `contacts_delete`
 - Mail: `email_list_folders`, `email_list_messages`, `email_get_message`,
-  `email_get_messages`, `email_search`, `email_send`, `email_move`,
+  `email_get_messages`, `email_list_attachments`, `email_get_attachment`,
+  `email_search`, `email_send`, `email_move`,
   `email_delete`, `email_mark_read`, `email_mark_unread`
 
 `calendar_create_event`, `contacts_create`, and `email_send` accept an
@@ -35,6 +36,72 @@ free-text birthdays are skipped. February 29 is supported; invalid query
 dates such as April 31 return status 400. The tool uses `contacts:read` and
 the configured contacts account. It loads fresh contacts on every call and
 filters on the server, so only matches are transmitted to the MCP client.
+
+## Read-only mail attachments
+
+Both new tools use the existing `mail:read` scope and configured mail account.
+They select exactly the supplied IMAP folder with `readonly=True` and fetch
+with `BODY.PEEK`, without setting Seen, changing flags, or writing files.
+No attachment is executed, rendered, uploaded, or interpreted as a local path.
+
+1. Call `email_list_attachments(message_id="17", folder="INBOX")`.
+   The result is `{message_id, folder, attachments: [...]}`. Each entry has
+   `part_id`, decoded `filename` (or `null`), `mime_type`, decoded byte `size`
+   (or `null` when unavailable/corrupt), `disposition`, `inline`, and
+   `retrievable`. Unavailable entries also have an explanatory `error`.
+2. Call `email_get_attachment(message_id="17", folder="INBOX", part_id="1.2")`
+   with the exact listed identifier. The result contains the same metadata,
+   `message_id`, `folder`, `encoding: "base64"`, and `content_base64`.
+   `content_base64` is standard RFC 4648 ASCII base64 with padding and no line
+   breaks, representing the original transfer-decoded leaf payload bytes.
+   For example, bytes `00 ff 01` are returned as `"AP8B"`. Decode once in the
+   MCP client to recover the binary; the server returns JSON, not a download
+   URL, filesystem path, data URI, or MCP resource. A zero-byte file returns
+   `size: 0` and `content_base64: ""`.
+
+`message_id` is one canonical decimal IMAP UID, never an RFC Message-ID or UID
+range. `folder` is an exact IMAP mailbox name; nested names such as
+`Archive/2026` are supported, while controls and traversal components are
+rejected. `part_id` is a MIME **tree path**, not an IMAP BODY section or a
+filename: root is `1`, children are `1.1`, `1.2`, and so on, including
+encapsulated messages. IDs are deterministic for an unchanged message in its
+folder and distinguish duplicate filenames. They have the same folder/UID
+lifetime as existing message tools: refresh IDs after moves or an IMAP
+UIDVALIDITY reset. No filename is accepted as a retrieval selector. Returned
+filenames are untrusted display metadata, including any path-like text.
+
+By default the list includes explicit `attachment` parts and filename-bearing
+parts without inline disposition or Content-ID. Pass `include_inline=true`
+to also list inline/CID resources; ordinary text/HTML body parts are excluded.
+Inline resources can be retrieved explicitly by their listed ID. Python's
+standard `email` parser decodes MIME structure, RFC 2047/RFC 2231 filenames,
+and transfer encodings. Parser-detected corrupt parts are listed as
+unretrievable; structural MIME corruption fails the request. The parser is
+permissive for encodings such as quoted-printable, so this is not a file
+integrity or malware check. Attached `message/rfc822` and multipart containers
+are listed as unretrievable (`size: null`), avoiding byte-changing
+reserialization; contained file attachments remain separately selectable.
+
+Limits are fixed and need no configuration: 16 MiB encoded message, 4 MiB
+transfer-decoded file, 100 listed entries, 1,000 MIME nodes, 30 nesting levels,
+128 KiB metadata JSON, and 6 MiB retrieval JSON (including base64 overhead).
+JSON limits count each ASCII-escaped serialized result object. MCP may
+include both text and structured representations of that object, so transport
+envelopes can be approximately twice that size plus protocol overhead. Oversized individual
+files remain listed with their size and `retrievable: false`; retrieval fails
+with a clear error. Exceeding message, tree, entry or JSON limits fails the
+request rather than returning a silently truncated result. Validation and
+limit errors use `{error: "...", status: 400}`; authentication and unexpected
+failures follow existing tool conventions (401 and generic 500).
+
+As in existing message reads, MIME parsing uses a full message held only in
+memory, rather than a custom IMAP BODYSTRUCTURE parser. Both calls first
+check `RFC822.SIZE`, then request at most 16 MiB + 1 with partial `BODY.PEEK`,
+and verify the returned literal size. Thus even retrieval of a small file
+from a message larger than 16 MiB is refused. Only the selected attachment
+is returned to the MCP client. Limits bound normal server responses; an
+IMAP server violating the requested partial-literal bound may still allocate
+memory inside the underlying IMAP library before our size check.
 
 ## Quick start with Docker Compose
 

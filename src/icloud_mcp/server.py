@@ -6,7 +6,7 @@ import sys
 from fastmcp import Context, FastMCP
 from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
 from mcp.types import ToolAnnotations
-from . import calendar, contacts, email as email_module
+from . import calendar, contacts, email as email_module, attachments
 from .auth import AuthenticationError, require_enabled, require_scope
 from .config import config
 from .idempotency import run_once
@@ -470,6 +470,49 @@ async def email_get_message(
         return await email_module.get_message(context, message_id, folder, include_body, full_html)
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}
+    except Exception:
+        logger.exception("Tool execution failed")
+        return {"error": "Internal error", "status": 500}
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=True))
+async def email_list_attachments(
+    context: Context,
+    message_id: str,
+    folder: str = "INBOX",
+    include_inline: bool = False,
+) -> dict:
+    """List attachment metadata and stable MIME tree part IDs for one folder/UID.
+
+    Inline resources are opt-in. No mail is changed.
+    """
+    try:
+        require_scope(context, "mail:read", f"{folder}:{message_id}")
+        return await attachments.list_attachments(context, message_id, folder, include_inline)
+    except AuthenticationError as e:
+        return {"error": str(e), "status": 401}
+    except attachments.AttachmentError as e:
+        return {"error": str(e), "status": 400}
+    except Exception:
+        logger.exception("Tool execution failed")
+        return {"error": "Internal error", "status": 500}
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=True))
+async def email_get_attachment(
+    context: Context, message_id: str, part_id: str, folder: str = "INBOX"
+) -> dict:
+    """Retrieve one listed leaf attachment as RFC 4648 content_base64.
+
+    encoding=base64, up to 4 MiB decoded. No paths, writes or mail changes.
+    """
+    try:
+        require_scope(context, "mail:read", f"{folder}:{message_id}")
+        return await attachments.get_attachment(context, message_id, part_id, folder)
+    except AuthenticationError as e:
+        return {"error": str(e), "status": 401}
+    except attachments.AttachmentError as e:
+        return {"error": str(e), "status": 400}
     except Exception:
         logger.exception("Tool execution failed")
         return {"error": "Internal error", "status": 500}
