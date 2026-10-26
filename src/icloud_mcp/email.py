@@ -691,7 +691,7 @@ def _select_from_address(username: str, from_address: Optional[str]) -> str:
         address = Address(addr_spec=sender)
         if not address.username or not address.domain or address.addr_spec != sender:
             raise ValueError
-    except (ValueError, HeaderParseError):
+    except (ValueError, HeaderParseError, IndexError):
         raise ValueError("from_address must be a single bare ASCII email address") from None
     if sender.lower() == username.lower():
         return sender
