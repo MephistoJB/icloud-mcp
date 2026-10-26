@@ -536,7 +536,8 @@ async def email_send(
     cc: str | None = None,
     bcc: str | None = None,
     html: bool = False,
-    request_id: str | None = None
+    request_id: str | None = None,
+    from_address: str | None = None
 ) -> dict:
     """
     Send an email message via SMTP.
@@ -549,14 +550,21 @@ async def email_send(
         bcc: BCC recipients (optional, comma-separated)
         html: Whether body is HTML (default: False)
         request_id: Optional idempotency key for safe retries
+        from_address: Optional approved alias for the visible From header
     """
     try:
         principal = require_scope(context, "mail:send", to)
         require_enabled(config.ENABLE_MAIL_SEND, "mail sending")
+        # Preserve existing stored fingerprints when the new argument is omitted.
+        payload = [to, subject, body, cc, bcc, html]
+        if from_address is not None:
+            payload.append(from_address)
         return await run_once(
             principal, "email_send", request_id,
-            [to, subject, body, cc, bcc, html],
-            lambda: email_module.send_message(context, to, subject, body, cc, bcc, html),
+            payload,
+            lambda: email_module.send_message(
+                context, to, subject, body, cc, bcc, html, from_address=from_address
+            ),
         )
     except AuthenticationError as e:
         return {"error": str(e), "status": 401}

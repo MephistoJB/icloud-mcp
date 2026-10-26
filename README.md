@@ -121,6 +121,7 @@ a same-named `_FILE` variant, such as
 | `ICLOUD_MAIL_EMAIL(_FILE)` | iCloud account | Actual iCloud Mail address when the Apple ID uses another address |
 | `ICLOUD_MAIL_APP_SPECIFIC_PASSWORD(_FILE)` | Apple app password | Optional separate app password for iCloud Mail |
 | `ICLOUD_ALLOW_HEADER_CREDENTIALS` | `false` | Permit per-request Apple credentials |
+| `EMAIL_SEND_FROM_ALLOWLIST` | empty | Exact comma-separated From aliases for the configured mail account; empty permits only the login address |
 | `EMAIL_SEND_ALLOWLIST` | empty | Exact comma-separated recipients; applies to SMTP and calendar invitations |
 | `ENABLE_CALENDAR_WRITE` | `true` | Create/update calendar events |
 | `ENABLE_CALENDAR_DELETE` | `false` | Delete calendar events |
@@ -208,3 +209,36 @@ unchanged; additive parameters are optional. `MCP_AUTH_TOKEN`, raw URL IDs,
 and stdio operation remain available for migration and upstream merges.
 
 MIT licensed; see `LICENSE`.
+
+### Selecting a mail sender
+
+`email_send` accepts optional `from_address`, for example
+`"from_address": "john@bechara.org"`. Omitting it (or passing `null`) keeps the
+mail login address as the visible sender. To enable an alias after deployment,
+set `EMAIL_SEND_FROM_ALLOWLIST=john@bechara.org` (comma-separated for multiple
+addresses). This is separate from the recipient `EMAIL_SEND_ALLOWLIST`.
+
+Only exact addresses are approved, compared case-insensitively: no domains,
+wildcards, display names, address lists, whitespace, control characters or
+non-ASCII mailboxes. A caller may always select its own mail login address.
+Aliases are restricted to `ICLOUD_MAIL_EMAIL` (falling back to `ICLOUD_EMAIL`);
+per-request credentials for a different account cannot use this alias list.
+All clients with `mail:send` on the configured account share the approved aliases.
+
+The alias must already be enabled for that same iCloud Mail account. This
+includes custom-domain addresses set up in iCloud+; merely receiving catch-all
+mail does not establish an approved sending identity. See Apple's
+[alias documentation](https://support.apple.com/en-ca/guide/icloud/mm6b1a490a/icloud)
+and [custom-domain setup](https://support.apple.com/en-asia/guide/iphone/iph4de56a8a2/27/ios/27).
+The local allowlist is an administrator assertion, not provider-side ownership
+verification. Do not approve addresses belonging to other accounts.
+
+Selection changes the MIME `From` header, including the stored Sent copy.
+SMTP authentication, SMTP envelope `MAIL FROM`, and IMAP authentication continue
+to use the mail login address. Provider rejection or rewriting remains possible;
+SMTP acceptance and delivery of aliases have not been tested with real mail.
+No SMTPUTF8 or display-name support is added.
+
+The selected `from_address` participates in request-ID matching; changing it
+requires a new `request_id`. Omitted/null sender calls retain the existing
+idempotency fingerprint, so pre-upgrade cached responses still replay.
