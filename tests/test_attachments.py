@@ -134,6 +134,7 @@ def test_standard_filename_decoding(connect, header, filename):
     )
     row = run(a.list_attachments(None, "17"))["attachments"][0]
     assert row["filename"] == filename
+    assert row["retrievable"] is True
 
 
 @pytest.mark.parametrize("payload", [b"", b"abc", b"\x00\xff"])
@@ -444,3 +445,233 @@ def test_mcp_unexpected_failure_remains_generic(monkeypatch):
         "error": "Internal error",
         "status": 500,
     }
+
+
+# All fixtures below are artificial MIME messages with opaque dummy bytes.
+# No private message, attachment, booking identifier or PDF is used.
+ENCODED_FILENAME = "=?utf-8?q?synthetic_?= =?utf-8?q?file.pdf?="
+
+
+def filename_fixture(headers=None, payload=b"ABC", wire=None):
+    if headers is None:
+        headers = [
+            ("Content-Type", f'application/pdf; name="{ENCODED_FILENAME}"'),
+            ("Content-Disposition", f'attachment; filename="{ENCODED_FILENAME}"'),
+            ("Content-Transfer-Encoding", "base64"),
+        ]
+    leaf = "\r\n".join(f"{name}: {value}" for name, value in headers).encode("ascii")
+    leaf += b"\r\n\r\n" + (base64.b64encode(payload) if wire is None else wire)
+    # Match the diagnosed tree location without copying the real message.
+    boundary = b"synthetic-filename-fixture"
+    children = [b"Content-Type: text/plain\r\n\r\nbody"] * 3 + [leaf]
+    return (
+        b'Content-Type: multipart/mixed; boundary="'
+        + boundary
+        + b'"\r\n\r\n'
+        + b"".join(b"--" + boundary + b"\r\n" + child + b"\r\n" for child in children)
+        + b"--"
+        + boundary
+        + b"--\r\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "name,filename,expected",
+    [
+        (ENCODED_FILENAME, ENCODED_FILENAME, "synthetic file.pdf"),
+        (ENCODED_FILENAME, None, "synthetic file.pdf"),
+        (None, ENCODED_FILENAME, "synthetic file.pdf"),
+        (None, "=?utf-8?b?c3ludGhldGljX2ZpbGUucGRm?=", "synthetic_file.pdf"),
+        (None, "=?utf-8?q?synthetic_?=\r\n =?utf-8?q?file.pdf?=", "synthetic file.pdf"),
+        (None, "=?utf-8?q?synthetic_r=C3=A9sum=C3=A9.pdf?=", "synthetic résumé.pdf"),
+        (None, "=?utf-8?q?../../synthetic.pdf?=", "../../synthetic.pdf"),
+    ],
+)
+def test_recover_encoded_word_filename_list_and_selected_bytes(
+    connect, name, filename, expected
+):
+    headers = [
+        ("Content-Type", "application/pdf" + (f'; name="{name}"' if name else "")),
+        (
+            "Content-Disposition",
+            "attachment" + (f'; filename="{filename}"' if filename else ""),
+        ),
+        ("Content-Transfer-Encoding", "base64"),
+    ]
+    client = connect(filename_fixture(headers, payload=b"\x00\xffABC"))
+    rows = run(a.list_attachments(None, "17"))["attachments"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["part_id"] == "1.4"
+    assert row["filename"] == expected
+    assert row["mime_type"] == "application/pdf" and row["disposition"] == "attachment"
+    assert row["retrievable"] is True and row["size"] == 5
+    result = run(a.get_attachment(None, "17", "1.4"))
+    assert base64.b64decode(result["content_base64"], validate=True) == b"\x00\xffABC"
+    assert client.closed
+    # The fake enforces readonly=True, exactly [17], SIZE and bounded PEEK.
+    assert all(call[0] in ("select", "fetch") for call in client.calls)
+
+
+@pytest.mark.parametrize("payload", [b"", b"ABC"])
+def test_recovered_header_does_not_rewrite_original_headers_or_payload(payload):
+    from email.parser import BytesParser
+
+    msg = BytesParser(policy=policy.default).parsebytes(
+        filename_fixture(payload=payload)
+    )
+    part = msg.get_payload()[3]
+    original = list(part.raw_items())
+    assert any(getattr(header, "defects", ()) for header in part.values())
+    first, decoded = a._metadata("1.4", part)
+    again, decoded_again = a._metadata("1.4", part)
+    assert first["retrievable"] and first["size"] == len(payload)
+    assert first == again and decoded == decoded_again == payload
+    assert list(part.raw_items()) == original
+    assert any(getattr(header, "defects", ()) for header in part.values())
+
+
+@pytest.mark.parametrize(
+    "header,value",
+    [
+        ("Content-Type", f'application; name="{ENCODED_FILENAME}"'),
+        ("Content-Type", f'application/pdf junk; name="{ENCODED_FILENAME}"'),
+        (
+            "Content-Type",
+            f'application/pdf; charset="=?utf-8?q?utf-8?="; name="{ENCODED_FILENAME}"',
+        ),
+        (
+            "Content-Type",
+            f'application/pdf; boundary="=?utf-8?q?boundary?="; name="{ENCODED_FILENAME}"',
+        ),
+        (
+            "Content-Type",
+            f'application/pdf; name="{ENCODED_FILENAME}"; name="second.pdf"',
+        ),
+        ("Content-Disposition", f'attachment junk; filename="{ENCODED_FILENAME}"'),
+        (
+            "Content-Disposition",
+            f'attachment; creation-date="=?utf-8?q?date?="; filename="{ENCODED_FILENAME}"',
+        ),
+        (
+            "Content-Disposition",
+            f'attachment; filename="{ENCODED_FILENAME}"; FILENAME="second.pdf"',
+        ),
+        (
+            "Content-Disposition",
+            'attachment; filename="=?unknown-charset?q?synthetic.pdf?="',
+        ),
+        ("Content-Disposition", 'attachment; filename="=?utf-8?b?/w==?="'),
+        ("Content-Disposition", 'attachment; filename="=?utf-8?b?A!!!?="'),
+        ("Content-Disposition", f'attachment; filename="{ENCODED_FILENAME}'),
+        ("Content-Transfer-Encoding", "base64 junk"),
+        ("Date", "not-a-date"),
+        ("Message-ID", "<malformed"),
+    ],
+)
+def test_recovery_does_not_relax_other_header_or_parameter_errors(
+    connect, header, value
+):
+    headers = [
+        ("Content-Type", f'application/pdf; name="{ENCODED_FILENAME}"'),
+        ("Content-Disposition", f'attachment; filename="{ENCODED_FILENAME}"'),
+        ("Content-Transfer-Encoding", "base64"),
+    ]
+    headers = [(name, text) for name, text in headers if name != header]
+    headers.append((header, value))
+    connect(filename_fixture(headers))
+    row = run(a.list_attachments(None, "17"))["attachments"][0]
+    assert row["retrievable"] is False
+    with pytest.raises(a.AttachmentError, match="Corrupt|Unsupported"):
+        run(a.get_attachment(None, "17", "1.4"))
+
+
+@pytest.mark.parametrize(
+    "header,value,other",
+    [
+        ("Content-Type", "application/pdf", "application/zip"),
+        ("Content-Disposition", 'attachment; filename="synthetic.pdf"', "inline"),
+        ("Content-Transfer-Encoding", "base64", "binary"),
+        ("MIME-Version", "1.0", "2.0"),
+    ],
+)
+@pytest.mark.parametrize("identical", [False, True])
+@pytest.mark.parametrize("encoded_filename", [False, True])
+def test_duplicate_critical_headers_stay_unretrievable(
+    connect, header, value, other, identical, encoded_filename
+):
+    filename = ENCODED_FILENAME if encoded_filename else "synthetic.pdf"
+    headers = [
+        ("Content-Type", "application/pdf"),
+        ("Content-Disposition", f'attachment; filename="{filename}"'),
+        ("Content-Transfer-Encoding", "base64"),
+    ]
+    headers = [(name, text) for name, text in headers if name != header]
+    headers.extend(
+        [(header, value), (header.swapcase(), value if identical else other)]
+    )
+    connect(filename_fixture(headers))
+    row = run(a.list_attachments(None, "17"))["attachments"][0]
+    assert not row["retrievable"]
+    with pytest.raises(a.AttachmentError, match="Corrupt"):
+        run(a.get_attachment(None, "17", "1.4"))
+
+
+@pytest.mark.parametrize("wire", [b"A!!!", b"QQ", b"QUJD!", b"QUJD\xff"])
+def test_recoverable_filename_never_masks_bad_base64(connect, wire):
+    connect(filename_fixture(wire=wire))
+    row = run(a.list_attachments(None, "17"))["attachments"][0]
+    assert not row["retrievable"]
+    with pytest.raises(a.AttachmentError, match="Corrupt"):
+        run(a.get_attachment(None, "17", "1.4"))
+
+
+def test_recovered_filename_still_enforces_file_size_limit(connect, monkeypatch):
+    monkeypatch.setattr(a, "MAX_ATTACHMENT_BYTES", 2)
+    connect(filename_fixture(payload=b"ABC"))
+    row = run(a.list_attachments(None, "17"))["attachments"][0]
+    assert not row["retrievable"] and row["size"] == 3
+    with pytest.raises(a.AttachmentError, match="exceeds 2"):
+        run(a.get_attachment(None, "17", "1.4"))
+
+
+@pytest.mark.parametrize("header", ["Content-Type", "Content-Disposition"])
+@pytest.mark.parametrize("encoded_filename", [False, True])
+def test_duplicate_filename_parameter_case_is_not_ambiguous(
+    connect, header, encoded_filename
+):
+    filename = ENCODED_FILENAME if encoded_filename else "synthetic.pdf"
+    parameter = "name" if header == "Content-Type" else "filename"
+    prefix = "application/pdf" if header == "Content-Type" else "attachment"
+    headers = [
+        ("Content-Type", "application/pdf"),
+        ("Content-Disposition", 'attachment; filename="synthetic.pdf"'),
+        ("Content-Transfer-Encoding", "base64"),
+    ]
+    headers = [(key, value) for key, value in headers if key != header]
+    headers.append(
+        (
+            header,
+            f'{prefix}; {parameter}="{filename}"; {parameter.upper()}="second.pdf"',
+        )
+    )
+    connect(filename_fixture(headers))
+    assert not run(a.list_attachments(None, "17"))["attachments"][0]["retrievable"]
+    with pytest.raises(a.AttachmentError, match="Corrupt"):
+        run(a.get_attachment(None, "17", "1.4"))
+
+
+def test_recovered_filename_keeps_other_valid_parameters_and_inline_classification(
+    connect,
+):
+    headers = [
+        ("Content-Type", f'image/png; name="{ENCODED_FILENAME}"; charset="utf-8"'),
+        ("Content-Disposition", f'inline; filename="{ENCODED_FILENAME}"; size="3"'),
+        ("Content-Transfer-Encoding", "quoted-printable"),
+    ]
+    connect(filename_fixture(headers, wire=b"=00=FF=01"))
+    assert run(a.list_attachments(None, "17"))["attachments"] == []
+    row = run(a.list_attachments(None, "17", include_inline=True))["attachments"][0]
+    assert row["retrievable"] and row["inline"] and row["mime_type"] == "image/png"
+    assert row["disposition"] == "inline"
+    assert run(a.get_attachment(None, "17", "1.4"))["content_base64"] == "AP8B"

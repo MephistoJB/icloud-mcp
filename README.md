@@ -75,8 +75,12 @@ parts without inline disposition or Content-ID. Pass `include_inline=true`
 to also list inline/CID resources; ordinary text/HTML body parts are excluded.
 Inline resources can be retrieved explicitly by their listed ID. Python's
 standard `email` parser decodes MIME structure, RFC 2047/RFC 2231 filenames,
-and transfer encodings. Parser-detected corrupt parts are listed as
-unretrievable; structural MIME corruption fails the request. The parser is
+and transfer encodings. Recoverable encoded-word formatting violations in
+`Content-Type`'s `name` or `Content-Disposition`'s `filename` parameter do not
+block retrieval when the remaining header is defect-free and retains the same
+MIME type/disposition. Other header/decoding defects and duplicate critical
+MIME headers or parameters remain unretrievable; no payload is rewritten.
+Structural MIME corruption fails the request. The parser is
 permissive for encodings such as quoted-printable, so this is not a file
 integrity or malware check. Attached `message/rfc822` and multipart containers
 are listed as unretrievable (`size: null`), avoiding byte-changing

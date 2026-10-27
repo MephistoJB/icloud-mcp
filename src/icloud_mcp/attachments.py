@@ -4,7 +4,10 @@ import base64
 import json
 import re
 from email import policy
-from email.parser import BytesParser
+from email.errors import HeaderParseError, InvalidHeaderDefect
+from email.header import decode_header
+from email.message import Message
+from email.parser import BytesParser, HeaderParser
 
 from . import email as mail
 
@@ -106,6 +109,79 @@ def _parts(message):
         yield path, part
 
 
+def _raw_parameter_header(part, name):
+    raw = next(value for key, value in part.raw_items() if key.lower() == name)
+    temporary = Message(policy=policy.compat32)
+    temporary[name] = raw
+    return temporary
+
+
+def _recoverable_filename_header(part, name, header):
+    """Allow only encoded-word formatting defects isolated to a filename."""
+    parameter = {"content-type": "name", "content-disposition": "filename"}.get(name)
+    if parameter is None or any(
+        type(defect) is not InvalidHeaderDefect
+        or str(defect)
+        not in {
+            "encoded word inside quoted string",
+            "missing trailing whitespace after encoded-word",
+        }
+        for defect in header.defects
+    ):
+        return False
+    try:
+        # compat32 preserves other parameters' raw encoded words. Rebuilding
+        # from str(header) would normalize them and hide unrelated defects.
+        temporary = _raw_parameter_header(part, name)
+        filename = temporary.get_param(parameter, header=name)
+        if not isinstance(filename, str):
+            return False
+        decoded = decode_header(filename)
+        if not any(charset for _, charset in decoded):
+            return False
+        for text, charset in decoded:
+            if isinstance(text, bytes):
+                text.decode(charset or "ascii", errors="strict")
+        temporary.del_param(parameter, header=name)
+        remaining = HeaderParser(policy=policy.default).parsestr(
+            f"{name}: {temporary[name]}\n\n"
+        )[name]
+        semantic = "content_type" if name == "content-type" else "content_disposition"
+        return not remaining.defects and getattr(remaining, semantic) == getattr(
+            header, semantic
+        )
+    except (HeaderParseError, ValueError, LookupError):
+        # Unknown encodings or future/unrecognized parser behavior fail closed.
+        return False
+
+
+def _headers_valid(part):
+    # Parsing does not itself flag duplicate fields: never choose an ambiguous
+    # first Content-Type/Disposition/Transfer-Encoding, even if each is valid.
+    for name in (
+        "Content-Type",
+        "Content-Disposition",
+        "Content-Transfer-Encoding",
+        "MIME-Version",
+    ):
+        if len(part.get_all(name, [])) > 1:
+            return False
+        if name in ("Content-Type", "Content-Disposition") and name in part:
+            try:
+                temporary = _raw_parameter_header(part, name.lower())
+                parameters = temporary.get_params([], header=name)[1:]
+                names = [key.lower() for key, _ in parameters]
+                if len(names) != len(set(names)):
+                    return False
+            except (HeaderParseError, ValueError, LookupError):
+                return False
+    return all(
+        not getattr(header, "defects", ())
+        or _recoverable_filename_header(part, name.lower(), header)
+        for name, header in part.items()
+    )
+
+
 def _metadata(part_id, part):
     filename = part.get_filename()
     disposition = part.get_content_disposition()
@@ -127,10 +203,7 @@ def _metadata(part_id, part):
             error = "Unsupported Content-Transfer-Encoding"
         else:
             payload = part.get_payload(decode=True)
-            headers = list(part.values())
-            if part.defects or any(
-                getattr(header, "defects", ()) for header in headers
-            ):
+            if part.defects or not _headers_valid(part):
                 error = "Corrupt MIME part or headers"
             elif payload is None:
                 error = "Attachment payload is missing"
